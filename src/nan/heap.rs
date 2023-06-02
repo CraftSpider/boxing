@@ -1,8 +1,8 @@
-use std::{fmt, mem, ptr};
 use crate::nan::raw::{RawStore, RawTag, Value};
 use crate::nan::{RawBox, SingleNaNF64};
 use crate::utils::ArrayExt;
 use std::marker::PhantomData;
+use std::{fmt, mem, ptr};
 
 fn write_int<I: IntInline>(val: I) -> [u8; 6] {
     let ty = (I::ty() as u16).to_ne_bytes();
@@ -27,9 +27,7 @@ pub enum HeapType {
     Ptr = 2,
     MutPtr = 3,
     Ref = 4,
-    // Removed because it means we can't implement `Clone`
-    // MutRef = 5,
-
+    // No MutRef because it means we can't implement `Clone`
     Box = 6,
 }
 
@@ -37,18 +35,17 @@ impl HeapType {
     fn raw_tag(self) -> RawTag {
         RawTag::new(false, self as u8)
     }
-    
+
     fn from_raw_tag(tag: RawTag) -> Option<HeapType> {
         if tag.is_neg() {
             return None;
         }
-        
+
         Some(match tag.val() {
             1 => HeapType::Int,
             2 => HeapType::Ptr,
             3 => HeapType::MutPtr,
             4 => HeapType::Ref,
-            // 5 => HeapType::MutRef,
             6 => HeapType::Box,
             _ => return None,
         })
@@ -260,31 +257,13 @@ impl<'a, T> HeapInline<T> for &'a T {
     }
 }
 
-// impl<'a, T> HeapInline<T> for &'a mut T {
-//     fn ty() -> HeapType {
-//         HeapType::MutRef
-//     }
-// 
-//     fn write(self, value: &mut Value) {
-//         RawStore::to_val(self as *mut T, value);
-//     }
-// 
-//     fn try_read(value: &Value) -> Option<Self> {
-//         if HeapType::from_raw_tag(value.tag()) == Some(Self::ty()) {
-//             Some(unsafe { &mut *<*mut T as RawStore>::from_val(value) })
-//         } else {
-//             None
-//         }
-//     }
-// }
-
 pub struct NanBox<'a, T>(RawBox, PhantomData<&'a mut T>);
 
 impl<'a, T> NanBox<'a, T> {
     fn from_raw(b: RawBox) -> NanBox<'a, T> {
         NanBox(b, PhantomData)
     }
-    
+
     #[must_use]
     pub fn from_f64(val: f64) -> NanBox<'a, T> {
         NanBox::from_raw(RawBox::from_f64(val))
@@ -293,56 +272,82 @@ impl<'a, T> NanBox<'a, T> {
     #[must_use]
     pub fn from_inline<U: HeapInline<T> + 'a>(val: U) -> NanBox<'a, T> {
         let ty = U::ty();
-        let raw =
-            RawBox::write(ty.raw_tag(), |b| U::write(val, b)).unwrap();
+        let raw = RawBox::write(ty.raw_tag(), |b| U::write(val, b)).unwrap();
         NanBox::from_raw(raw)
     }
 
     #[must_use]
     pub fn from_box(val: Box<T>) -> NanBox<'a, T> {
-        let raw = RawBox::write(
-            HeapType::Box.raw_tag(),
-            |v| <*mut T as HeapInline<_>>::write(Box::into_raw(val), v),
-        )
+        let raw = RawBox::write(HeapType::Box.raw_tag(), |v| {
+            <*mut T as HeapInline<_>>::write(Box::into_raw(val), v)
+        })
         .unwrap();
         NanBox::from_raw(raw)
     }
-    
+
     #[must_use]
     pub fn try_ref_f64(&self) -> Option<&f64> {
         self.0.ref_f64()
     }
-    
+
     #[must_use]
     pub fn try_mut_f64(&mut self) -> Option<&mut SingleNaNF64> {
         self.0.mut_f64()
     }
-    
+
     pub fn try_into_f64(mut self) -> Result<f64, Self> {
         let inner = mem::replace(&mut self.0, RawBox::from_f64(f64::NAN));
-        inner.into_f64()
-            .map_err(NanBox::from_raw)
+        inner.into_f64().map_err(NanBox::from_raw)
     }
-    
+
     pub fn try_into_inline<U: HeapInline<T> + 'a>(self) -> Result<U, Self> {
-        self.0.try_read(|val| U::try_read(val))
-            .ok_or(self)
+        self.0.try_read(|val| U::try_read(val)).ok_or(self)
     }
-    
+
     pub fn try_into_boxed(mut self) -> Result<T, Self> {
-        let out = self.0.try_read(|val| if HeapType::from_raw_tag(val.tag()) == Some(HeapType::Box) {
-            let ptr = <*mut T as RawStore>::from_val(val);
-            Some(unsafe { *Box::from_raw(ptr) })
-        } else {
-            None
+        let out = self.0.try_read(|val| {
+            if HeapType::from_raw_tag(val.tag()) == Some(HeapType::Box) {
+                let ptr = <*mut T as RawStore>::from_val(val);
+                Some(unsafe { *Box::from_raw(ptr) })
+            } else {
+                None
+            }
         });
-        
+
         match out {
             Some(val) => {
                 self.0 = RawBox::from_val(HeapType::Box.raw_tag(), ptr::null::<T>()).unwrap();
                 Ok(val)
             }
-            None => Err(self)
+            None => Err(self),
+        }
+    }
+}
+
+impl<'a, T> Clone for NanBox<'a, T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        let tag = self.0.tag().and_then(HeapType::from_raw_tag);
+
+        match tag {
+            None => NanBox::from_f64(*self.0.ref_f64().unwrap()),
+            Some(HeapType::Int) => {
+                let data = self.0.ref_data().unwrap();
+                NanBox::from_raw(RawBox::from_data(HeapType::Int.raw_tag(), *data).unwrap())
+            }
+            Some(tag @ (HeapType::Ptr | HeapType::MutPtr | HeapType::Ref)) => {
+                let ptr = self.0.read(<*const T>::from_val).unwrap();
+                NanBox::from_raw(
+                    RawBox::write(tag.raw_tag(), |w| <*const T>::to_val(ptr, w)).unwrap(),
+                )
+            }
+            Some(HeapType::Box) => {
+                let ptr = self.0.read(<*const T>::from_val).unwrap();
+                let r = unsafe { &*ptr };
+                NanBox::from_box(Box::new(T::clone(r)))
+            }
         }
     }
 }
@@ -355,11 +360,11 @@ where
         if self.0.tag() != other.0.tag() {
             return false;
         }
-        
+
         match self.0.tag().and_then(HeapType::from_raw_tag) {
             None => self.0.ref_f64() == other.0.ref_f64(),
             Some(HeapType::Int | HeapType::Ptr | HeapType::MutPtr) => self.0.ref_data() == other.0.ref_data(),
-            Some(HeapType::Ref /*| HeapType::MutRef*/ | HeapType::Box) => {
+            Some(HeapType::Ref | HeapType::Box) => {
                 let ptr1 = self.0.read(<*const T>::from_val)
                     .unwrap();
                 let ptr2 = other.0.read(<*const T>::from_val)
@@ -373,11 +378,11 @@ where
 
 impl<'a, T> fmt::Debug for NanBox<'a, T>
 where
-    T: fmt::Debug
+    T: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let tag = self.0.tag().and_then(HeapType::from_raw_tag);
-        
+
         let var = match tag {
             None => "NanBox::Float",
             Some(HeapType::Int) => {
@@ -396,12 +401,11 @@ where
             Some(HeapType::Ptr) => "NanBox::Ptr",
             Some(HeapType::MutPtr) => "NanBox::MutPtr",
             Some(HeapType::Ref) => "NanBox::Ref",
-            // Some(HeapType::MutRef) => "NanBox::Mut",
             Some(HeapType::Box) => "NanBox::Box",
         };
-        
+
         let mut tuple = f.debug_tuple(var);
-        
+
         match tag {
             None => {
                 let val = self.0.ref_f64().unwrap();
@@ -427,14 +431,14 @@ where
                     .unwrap();
                 tuple.field(&ptr);
             }
-            Some(HeapType::Ref /*| HeapType::MutRef*/ | HeapType::Box) => {
+            Some(HeapType::Ref | HeapType::Box) => {
                 let ptr = self.0.read(<*const T>::from_val)
                     .unwrap();
                 let r = unsafe { &*ptr };
                 tuple.field(r);
             }
         }
-        
+
         tuple.finish()
     }
 }
@@ -453,34 +457,34 @@ impl<'a, T> Drop for NanBox<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_roundtrip_f64() {
         let a = NanBox::<()>::from_f64(1.0);
         assert_eq!(a.try_into_f64(), Ok(1.0));
-        
+
         let b = NanBox::<()>::from_f64(f64::NAN);
         assert_eq!(b.try_into_f64().unwrap().to_bits(), crate::nan::QUIET_NAN);
     }
-    
+
     #[test]
     fn test_roundtrip_ref() {
         let r = 1;
-        
+
         let a = NanBox::<i32>::from_inline(&r);
         assert_eq!(a.try_into_inline::<&i32>(), Ok(&1));
     }
-    
+
     #[test]
     fn test_roundtrip_boxed() {
         #[derive(Debug, PartialEq)]
         struct VeryLarge([u8; 128]);
         let r = Box::new(VeryLarge([0x55; 128]));
-        
+
         let a = NanBox::<VeryLarge>::from_box(r);
         assert_eq!(a.try_into_boxed(), Ok(VeryLarge([0x55; 128])));
     }
-    
+
     #[test]
     fn test_eq() {
         let a = NanBox::<i32>::from_f64(1.0);
@@ -489,7 +493,7 @@ mod tests {
         let d = NanBox::<i32>::from_inline(1);
         let e = NanBox::from_inline(&10);
         let f = NanBox::from_box(Box::new(-10));
-        
+
         assert_eq!(a, a);
         assert_eq!(b, b);
         assert_eq!(c, c);

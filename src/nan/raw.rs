@@ -72,7 +72,10 @@ fn store_ptr<P: Strict + Copy>(value: &mut Value, ptr: P) {
     }
     #[cfg(target_pointer_width = "64")]
     {
-        assert!(ptr.addr() <= 0x0000_FFFF_FFFF_FFFF, "Pointer too large to store in NaN box");
+        assert!(
+            ptr.addr() <= 0x0000_FFFF_FFFF_FFFF,
+            "Pointer too large to store in NaN box"
+        );
 
         // SAFETY: We ensure pointer range will fit in 6 bytes, then mask it to match
         let val = (unsafe { value.mut_whole() } as *mut [u8; 8]).cast::<P>();
@@ -107,7 +110,7 @@ impl<T> RawStore for *const T {
     fn to_val(self, value: &mut Value) {
         store_ptr::<*const T>(value, self);
     }
-    
+
     fn from_val(value: &Value) -> Self {
         load_ptr::<*const T>(value)
     }
@@ -180,7 +183,7 @@ impl RawTag {
     }
 
     /// # Safety
-    /// 
+    ///
     /// `val` must be in the range `0..8`
     #[must_use]
     pub unsafe fn new_unchecked(neg: bool, val: u8) -> RawTag {
@@ -385,14 +388,14 @@ impl RawBox {
         T::to_val(val, unsafe { &mut out.val });
         Some(out)
     }
-    
+
     #[must_use]
     pub fn write(tag: RawTag, f: impl FnOnce(&mut Value)) -> Option<RawBox> {
         let mut out = Self::from_data(tag, [0; 6])?;
         f(unsafe { &mut out.val });
         Some(out)
     }
-    
+
     #[must_use]
     pub fn tag(&self) -> Option<RawTag> {
         if self.is_data() {
@@ -481,7 +484,7 @@ impl RawBox {
             Err(self)
         }
     }
-    
+
     pub fn read<T>(&self, f: impl FnOnce(&Value) -> T) -> Option<T> {
         if self.is_data() {
             let val = unsafe { &self.val };
