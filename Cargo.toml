@@ -6,5 +6,17 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-either = "1.8"
 sptr = "0.3"
+
+[dev-dependencies]
+criterion = { version = "0.4", features = ["html_reports"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+pprof = { version = "0.11", features = ["criterion", "flamegraph"] }
+
+[profile.bench]
+debug = true
+
+[[bench]]
+name = "raw"
+harness = false

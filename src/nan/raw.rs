@@ -1,7 +1,6 @@
 use super::{NEG_QUIET_NAN, QUIET_NAN, SIGN_MASK};
 use crate::nan::singlenan::SingleNaNF64;
 use crate::utils::ArrayExt;
-use either::Either;
 use sptr::Strict;
 use std::fmt;
 
@@ -20,21 +19,21 @@ pub trait RawStore: Sized {
 
 impl RawStore for [u8; 6] {
     fn to_val(self, value: &mut Value) {
-        value.write(self);
+        value.set_data(self);
     }
 
     fn from_val(value: &Value) -> Self {
-        value.read()
+        value.data()
     }
 }
 
 impl RawStore for bool {
     fn to_val(self, value: &mut Value) {
-        value.write([1].truncate_to());
+        value.set_data([1].truncate_to());
     }
 
     fn from_val(value: &Value) -> Self {
-        value.ref_value()[0] == 1
+        value.ref_data()[0] == 1
     }
 }
 
@@ -43,11 +42,11 @@ macro_rules! int_store {
         impl RawStore for $ty {
             fn to_val(self, value: &mut Value) {
                 let bytes = self.to_ne_bytes();
-                value.write(bytes.truncate_to());
+                value.set_data(bytes.truncate_to());
             }
 
             fn from_val(value: &Value) -> Self {
-                <$ty>::from_ne_bytes(value.ref_value().truncate_to())
+                <$ty>::from_ne_bytes(value.ref_data().truncate_to())
             }
         }
     };
@@ -319,21 +318,21 @@ impl Value {
         &self.header
     }
 
-    pub fn write(&mut self, val: [u8; 6]) {
+    pub fn set_data(&mut self, val: [u8; 6]) {
         self.value = val;
     }
 
     #[must_use]
-    pub fn read(&self) -> [u8; 6] {
+    pub fn data(&self) -> [u8; 6] {
         self.value
     }
 
     #[must_use]
-    pub fn ref_value(&self) -> &[u8; 6] {
+    pub fn ref_data(&self) -> &[u8; 6] {
         &self.value
     }
 
-    pub fn mut_value(&mut self) -> &mut [u8; 6] {
+    pub fn mut_data(&mut self) -> &mut [u8; 6] {
         &mut self.value
     }
 
@@ -346,12 +345,15 @@ impl Value {
     }
 }
 
+// TODO: Implement Debug
 /// A simple 'raw' NaN-boxed type, which provides no type checking of its own,
 #[repr(C)]
 pub union RawBox {
     bits: u64,
     float: f64,
     val: Value,
+    // Used when cloning, to preserve provenance
+    ptr: *const (),
 }
 
 impl RawBox {
@@ -426,6 +428,7 @@ impl RawBox {
         }
     }
 
+    #[must_use]
     pub fn mut_f64(&mut self) -> Option<&mut SingleNaNF64> {
         if self.is_f64() {
             SingleNaNF64::from_mut(unsafe { &mut self.float })
@@ -433,25 +436,26 @@ impl RawBox {
             None
         }
     }
-
+    
     #[must_use]
-    pub fn ref_data(&self) -> Option<&[u8; 6]> {
+    pub fn ref_val(&self) -> Option<&Value> {
         if self.is_data() {
-            // SAFETY: If we pass the check, we contain NaN-boxed data, and can safely access the
-            //         tail as raw bytes
-            Some(unsafe { &self.val.value })
+            // SAFETY: If we pass the check, we contain NaN-boxed data, and can safely ourselves as
+            //         a data value
+            Some(unsafe { &self.val })
         } else {
             None
         }
     }
-
-    pub fn mut_data(&mut self) -> Option<&mut [u8; 6]> {
+    
+    #[must_use]
+    pub fn mut_val(&mut self) -> Option<&mut Value> {
         if self.is_data() {
             // SAFETY: If we pass the check, we contain NaN-boxed data, and can safely access
             //         the tail as raw bytes
             //         We ensure tag != 0 on creation to allow this, writing all 0 bytes to data
             //         can never break our invariants.
-            Some(unsafe { &mut self.val.value })
+            Some(unsafe { &mut self.val })
         } else {
             None
         }
@@ -494,7 +498,7 @@ impl RawBox {
         }
     }
 
-    pub fn try_read<T>(&self, f: impl FnOnce(&Value) -> Option<T>) -> Option<T> {
+    pub fn try_read<'a, T>(&'a self, f: impl FnOnce(&'a Value) -> Option<T>) -> Option<T> {
         if self.is_data() {
             let val = unsafe { &self.val };
             f(val)
@@ -502,14 +506,40 @@ impl RawBox {
             None
         }
     }
-
-    #[must_use]
-    pub fn into_f64_or_raw(self) -> Either<f64, (RawTag, [u8; 6])> {
-        if self.is_f64() {
-            Either::Left(unsafe { self.float })
+    
+    pub fn try_read_mut<'a, T>(&'a mut self, f: impl FnOnce(&'a mut Value) -> Option<T>) -> Option<T> {
+        if self.is_data() {
+            let val = unsafe { &mut self.val };
+            f(val)
         } else {
-            let val = unsafe { self.val };
-            Either::Right((val.header.tag(), val.value))
+            None
+        }
+    }
+}
+
+impl Clone for RawBox {
+    fn clone(&self) -> Self {
+        RawBox { ptr: unsafe { self.ptr } }
+    }
+}
+
+impl fmt::Debug for RawBox {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.ref_f64() {
+            Some(val) => {
+                f.debug_tuple("RawBox::Float")
+                    .field(val)
+                    .finish()
+                
+            }
+            None => {
+                let val = self.ref_val().unwrap();
+                
+                f.debug_struct("RawBox::Data")
+                    .field("tag", &val.tag())
+                    .field("data", val.ref_data())
+                    .finish()
+            }
         }
     }
 }
@@ -534,14 +564,12 @@ mod tests {
         let c = RawBox::from_f64(f64::NAN);
         assert!(c
             .into_f64()
-            .ok()
-            .is_some_and(|val| val.is_nan() && val.is_sign_positive()));
+            .is_ok_and(|val| val.is_nan() && val.is_sign_positive()));
 
         let d = RawBox::from_f64(-f64::NAN);
         assert!(d
             .into_f64()
-            .ok()
-            .is_some_and(|val| val.is_nan() && val.is_sign_negative()));
+            .is_ok_and(|val| val.is_nan() && val.is_sign_negative()));
     }
 
     #[test]
@@ -583,25 +611,25 @@ mod tests {
     #[test]
     fn test_roundtrip_u32() {
         let a = RawBox::from_val(RawTag::new(false, 1), 0u32).unwrap();
-        assert!(matches!(a.into_val().ok(), Some((_, 0u32))));
+        assert!(matches!(a.into_val(), Ok((_, 0u32))));
 
         let b = RawBox::from_val(RawTag::new(false, 1), 1u32).unwrap();
-        assert!(matches!(b.into_val().ok(), Some((_, 1u32))));
+        assert!(matches!(b.into_val(), Ok((_, 1u32))));
 
         let c = RawBox::from_val(RawTag::new(false, 1), 0xFFFF_FFFFu32).unwrap();
-        assert!(matches!(c.into_val().ok(), Some((_, 0xFFFF_FFFFu32))));
+        assert!(matches!(c.into_val(), Ok((_, 0xFFFF_FFFFu32))));
     }
 
     #[test]
     fn test_roundtrip_i32() {
         let a = RawBox::from_val(RawTag::new(false, 1), 0i32).unwrap();
-        assert!(matches!(a.into_val().ok(), Some((_, 0i32))));
+        assert!(matches!(a.into_val(), Ok((_, 0i32))));
 
         let b = RawBox::from_val(RawTag::new(false, 1), 1i32).unwrap();
-        assert!(matches!(b.into_val().ok(), Some((_, 1i32))));
+        assert!(matches!(b.into_val(), Ok((_, 1i32))));
 
         let c = RawBox::from_val(RawTag::new(false, 1), -1i32).unwrap();
-        assert!(matches!(c.into_val().ok(), Some((_, -1i32))));
+        assert!(matches!(c.into_val(), Ok((_, -1i32))));
     }
 
     #[test]
@@ -610,7 +638,7 @@ mod tests {
         let ptr = &mut *data as *mut i32;
 
         let a = RawBox::from_val(RawTag::new(false, 1), ptr).unwrap();
-        let out = a.into_val::<*mut i32>().ok().unwrap();
+        let out = a.into_val::<*mut i32>().unwrap();
         assert_eq!(out, (RawTag::new(false, 1), ptr));
 
         // Check that we can still read/write through the pointer
@@ -619,5 +647,29 @@ mod tests {
         unsafe { *ptr = 2 };
 
         assert_eq!(*data, 2);
+    }
+    
+    #[test]
+    fn test_clone_ptr() {
+        // This test is mostly for miri - it ensures we preserve provenance across cloning the underlying box
+        
+        let val = 1;
+        
+        let a = RawBox::from_val(RawTag::new(false, 1), &val as *const i32)
+            .unwrap();
+        
+        let b = a.clone();
+        
+        let ptr = b.into_val::<*const i32>()
+            .unwrap()
+            .1;
+        assert_eq!(unsafe { *ptr }, 1);
+    }
+    
+    #[test]
+    fn test_clone_f64() {
+        let a = RawBox::from_f64(1.0);
+        let b = a.clone();
+        assert_eq!(b.into_f64().ok(), Some(1.0));
     }
 }
