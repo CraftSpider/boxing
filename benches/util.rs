@@ -4,7 +4,7 @@ pub fn criterion() -> Criterion {
     let mut out = Criterion::default();
     #[cfg(unix)]
     {
-        use pprof::criterion::{PProfProfiler, Output};
+        use pprof::criterion::{Output, PProfProfiler};
         out = out.with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)));
     }
     out.configure_from_args()

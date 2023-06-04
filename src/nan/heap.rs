@@ -2,9 +2,9 @@ use crate::nan::raw::{RawStore, RawTag, Value};
 use crate::nan::{RawBox, SingleNaNF64};
 use crate::utils::ArrayExt;
 use std::marker::PhantomData;
-use std::{fmt, mem};
 use std::num::NonZeroU8;
 use std::ops::Deref;
+use std::{fmt, mem};
 
 fn int_ty(bytes: impl Deref<Target = [u8; 6]>) -> IntType {
     #[cfg(target_endian = "big")]
@@ -17,7 +17,12 @@ fn int_ty(bytes: impl Deref<Target = [u8; 6]>) -> IntType {
 fn int_data(bytes: &[u8; 6]) -> &[u8; 4] {
     #[cfg(target_endian = "big")]
     // SAFETY: We're offsetting by 2 and shrinking, which is legal
-    let data = unsafe { &*(bytes as *const [u8; 6]).cast::<u8>().offset(2).cast::<[u8; 4]>() };
+    let data = unsafe {
+        &*(bytes as *const [u8; 6])
+            .cast::<u8>()
+            .offset(2)
+            .cast::<[u8; 4]>()
+    };
     #[cfg(target_endian = "little")]
     // SAFETY: We're just shrinking the array, which is legal
     let data = unsafe { &*(bytes as *const [u8; 6]).cast::<[u8; 4]>() };
@@ -27,7 +32,12 @@ fn int_data(bytes: &[u8; 6]) -> &[u8; 4] {
 fn int_data_mut(bytes: &mut [u8; 6]) -> &mut [u8; 4] {
     #[cfg(target_endian = "big")]
     // SAFETY: We're offsetting by 2 and shrinking, which is legal
-    let data = unsafe { &mut *(bytes as *mut [u8; 6]).cast::<u8>().offset(2).cast::<[u8; 4]>() };
+    let data = unsafe {
+        &mut *(bytes as *mut [u8; 6])
+            .cast::<u8>()
+            .offset(2)
+            .cast::<[u8; 4]>()
+    };
     #[cfg(target_endian = "little")]
     // SAFETY: We're just shrinking the array, which is legal
     let data = unsafe { &mut *(bytes as *mut [u8; 6]).cast::<[u8; 4]>() };
@@ -46,7 +56,7 @@ fn write_int<I: IntInline>(val: I) -> [u8; 6] {
 fn read_int<I: IntInline>(bytes: &[u8; 6]) -> Option<I> {
     let ty = int_ty(bytes);
     let data = int_data(bytes);
-    
+
     if ty == I::ty() {
         // SAFETY: Data is guaranteed valid for I, since the type is that of I, and 4-byte aligned
         Some(unsafe { I::from_bytes(*data) })
@@ -126,14 +136,14 @@ trait IntInline: Sized {
     fn to_bytes(self) -> [u8; 4];
 
     /// # Safety
-    /// 
+    ///
     /// The provided bytes must be a valid instance of this type, obeying niche requirements
     unsafe fn from_bytes(bytes: [u8; 4]) -> Self;
-    
+
     unsafe fn ref_bytes(bytes: &[u8; 4]) -> &Self {
         &*bytes.as_ptr().cast()
     }
-    
+
     unsafe fn mut_bytes(bytes: &mut [u8; 4]) -> &mut Self {
         &mut *bytes.as_mut_ptr().cast()
     }
@@ -144,7 +154,7 @@ pub trait HeapInline<T>: Sized {
     fn write(self, value: &mut Value);
 
     /// # Safety
-    /// 
+    ///
     /// The caller must have ensured that the value contains a valid instance of this type
     unsafe fn try_read(value: &Value) -> Option<Self>;
 }
@@ -356,7 +366,7 @@ impl<'a, T> NanBox<'a, T> {
     pub fn try_mut_f64(&mut self) -> Option<&mut SingleNaNF64> {
         self.0.float_mut()
     }
-    
+
     #[must_use]
     pub fn try_ref_inline<U: HeapInlineRef<T> + 'a>(&self) -> Option<&U> {
         self.0.value().and_then(|val| {
@@ -367,7 +377,7 @@ impl<'a, T> NanBox<'a, T> {
             }
         })
     }
-    
+
     #[must_use]
     pub fn try_mut_inline<U: HeapInlineRef<T> + 'a>(&mut self) -> Option<&mut U> {
         self.0.value_mut().and_then(|val| {
@@ -378,7 +388,7 @@ impl<'a, T> NanBox<'a, T> {
             }
         })
     }
-    
+
     #[must_use]
     pub fn try_ref_boxed(&self) -> Option<&T> {
         self.0.value().and_then(|val| {
@@ -410,28 +420,34 @@ impl<'a, T> NanBox<'a, T> {
     }
 
     pub fn try_into_inline<U: HeapInline<T> + 'a>(self) -> Result<U, Self> {
-        self.0.value().and_then(|val| {
-            if HeapType::from_raw_tag(val.tag()) == Some(U::ty()) {
-                // SAFETY: We just checked that the type matches, so this is sound
-                unsafe { U::try_read(&val) }
-            } else {
-                None
-            }
-        }).ok_or(self)
+        self.0
+            .value()
+            .and_then(|val| {
+                if HeapType::from_raw_tag(val.tag()) == Some(U::ty()) {
+                    // SAFETY: We just checked that the type matches, so this is sound
+                    unsafe { U::try_read(&val) }
+                } else {
+                    None
+                }
+            })
+            .ok_or(self)
     }
 
     pub fn try_into_boxed(mut self) -> Result<T, Self> {
         let inner = mem::replace(&mut self.0, RawBox::from_f64(f64::NAN));
 
-        inner.into_value().and_then(|val| {
-            if HeapType::from_raw_tag(val.tag()) == Some(HeapType::Box) {
-                let ptr = val.load::<*mut T>();
-                // SAFETY: Since type matches, this value was leaked from a box
-                Ok(unsafe { *Box::from_raw(ptr) })
-            } else {
-                Err(RawBox::from_value(val))
-            }
-        }).map_err(NanBox::from_raw)
+        inner
+            .into_value()
+            .and_then(|val| {
+                if HeapType::from_raw_tag(val.tag()) == Some(HeapType::Box) {
+                    let ptr = val.load::<*mut T>();
+                    // SAFETY: Since type matches, this value was leaked from a box
+                    Ok(unsafe { *Box::from_raw(ptr) })
+                } else {
+                    Err(RawBox::from_value(val))
+                }
+            })
+            .map_err(NanBox::from_raw)
     }
 }
 
@@ -446,7 +462,10 @@ where
             None => NanBox::from_f64(*self.0.float().unwrap()),
             Some(HeapType::Int) => {
                 let data = self.0.value().unwrap().data();
-                NanBox::from_raw(RawBox::from_value(Value::new(HeapType::Int.raw_tag(), *data)))
+                NanBox::from_raw(RawBox::from_value(Value::new(
+                    HeapType::Int.raw_tag(),
+                    *data,
+                )))
             }
             Some(tag @ (HeapType::Ptr | HeapType::MutPtr | HeapType::Ref)) => {
                 let ptr = self.0.value().map(<*const T>::from_val).unwrap();
@@ -475,12 +494,10 @@ where
             None => self.0.float() == other.0.float(),
             Some(HeapType::Int | HeapType::Ptr | HeapType::MutPtr) => {
                 self.0.value().map(Value::data) == other.0.value().map(Value::data)
-            },
+            }
             Some(HeapType::Ref | HeapType::Box) => {
-                let ptr1 = self.0.value().map(<*const T>::from_val)
-                    .unwrap();
-                let ptr2 = other.0.value().map(<*const T>::from_val)
-                    .unwrap();
+                let ptr1 = self.0.value().map(<*const T>::from_val).unwrap();
+                let ptr2 = other.0.value().map(<*const T>::from_val).unwrap();
 
                 // SAFETY: Type matches, and both Ref and Box guarantee our inner value is sound
                 //         to turn into a reference
@@ -549,13 +566,11 @@ where
                 };
             }
             Some(HeapType::Ptr | HeapType::MutPtr) => {
-                let ptr = self.0.value().map(<*const T>::from_val)
-                    .unwrap();
+                let ptr = self.0.value().map(<*const T>::from_val).unwrap();
                 tuple.field(&ptr);
             }
             Some(HeapType::Ref | HeapType::Box) => {
-                let ptr = self.0.value().map(<*const T>::from_val)
-                    .unwrap();
+                let ptr = self.0.value().map(<*const T>::from_val).unwrap();
                 let r = unsafe { &*ptr };
                 tuple.field(r);
             }
@@ -586,7 +601,7 @@ mod tests {
         let b = NanBox::<()>::from_f64(f64::NAN);
         assert_eq!(b.try_into_f64().unwrap().to_bits(), crate::nan::QUIET_NAN);
     }
-    
+
     #[test]
     fn test_roundtrip_bool() {
         let a = NanBox::<()>::from_inline(true);
@@ -622,14 +637,14 @@ mod tests {
         let a = NanBox::<VeryLarge>::from_box(r);
         assert_eq!(a.try_into_boxed(), Ok(VeryLarge([0x55; 128])));
     }
-    
+
     #[test]
     fn test_ref_u32() {
         let mut a = NanBox::<i32>::from_inline(-100i32);
-        
+
         let r1 = a.try_ref_inline::<i32>().unwrap();
         assert_eq!(*r1, -100);
-        
+
         let r2 = a.try_mut_inline::<i32>().unwrap();
         *r2 = 100;
         assert_eq!(*r2, 100);

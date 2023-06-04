@@ -207,16 +207,12 @@ impl RawTag {
 
     #[must_use]
     pub fn is_neg(self) -> bool {
-        matches!(
-            self.0,
-                | TagVal::_N1
-                | TagVal::_N2
-                | TagVal::_N3
-                | TagVal::_N4
-                | TagVal::_N5
-                | TagVal::_N6
-                | TagVal::_N7
-        )
+        matches!(self.0, |TagVal::_N1| TagVal::_N2
+            | TagVal::_N3
+            | TagVal::_N4
+            | TagVal::_N5
+            | TagVal::_N6
+            | TagVal::_N7)
     }
 
     #[must_use]
@@ -302,7 +298,10 @@ pub struct Value {
 
 impl Value {
     pub fn new(tag: RawTag, data: [u8; 6]) -> Value {
-        Value { header: Header::new(tag), data }
+        Value {
+            header: Header::new(tag),
+            data,
+        }
     }
 
     pub fn empty(tag: RawTag) -> Value {
@@ -382,7 +381,9 @@ impl RawBox {
 
     #[must_use]
     pub fn from_value(value: Value) -> RawBox {
-        RawBox { value: ManuallyDrop::new(value) }
+        RawBox {
+            value: ManuallyDrop::new(value),
+        }
     }
 
     #[must_use]
@@ -423,7 +424,7 @@ impl RawBox {
             None
         }
     }
-    
+
     #[must_use]
     pub fn value(&self) -> Option<&Value> {
         if self.is_value() {
@@ -434,7 +435,7 @@ impl RawBox {
             None
         }
     }
-    
+
     #[must_use]
     pub fn value_mut(&mut self) -> Option<&mut Value> {
         if self.is_value() {
@@ -469,21 +470,19 @@ impl RawBox {
 
 impl Clone for RawBox {
     fn clone(&self) -> Self {
-        RawBox { ptr: unsafe { self.ptr } }
+        RawBox {
+            ptr: unsafe { self.ptr },
+        }
     }
 }
 
 impl fmt::Debug for RawBox {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.float() {
-            Some(val) => {
-                f.debug_tuple("RawBox::Float")
-                    .field(val)
-                    .finish()
-            }
+            Some(val) => f.debug_tuple("RawBox::Float").field(val).finish(),
             None => {
                 let val = self.value().unwrap();
-                
+
                 f.debug_struct("RawBox::Data")
                     .field("tag", &val.tag())
                     .field("data", val.data())
@@ -528,10 +527,16 @@ mod tests {
         let seven = NonZeroU8::new(7).unwrap();
 
         let a = RawBox::from_value(Value::empty(RawTag::new(false, one)));
-        assert_eq!(a.into_value().ok(), Some(Value::empty(RawTag::new(false, one))));
+        assert_eq!(
+            a.into_value().ok(),
+            Some(Value::empty(RawTag::new(false, one)))
+        );
 
         let b = RawBox::from_value(Value::empty(RawTag::new(true, seven)));
-        assert_eq!(b.into_value().ok(), Some(Value::empty(RawTag::new(true, seven))));
+        assert_eq!(
+            b.into_value().ok(),
+            Some(Value::empty(RawTag::new(true, seven)))
+        );
 
         let c = RawBox::from_value(Value::new(RawTag::new(false, seven), [0, 0, 0, 0, 0, 1]));
         assert_eq!(
@@ -589,23 +594,24 @@ mod tests {
 
         assert_eq!(*data, 2);
     }
-    
+
     #[test]
     fn test_clone_ptr() {
         // This test is mostly for miri - it ensures we preserve provenance across cloning the underlying box
-        
+
         let val = 1;
-        
-        let a = RawBox::from_value(Value::store(RawTag::new(false, NonZeroU8::MIN), &val as *const i32));
-        
+
+        let a = RawBox::from_value(Value::store(
+            RawTag::new(false, NonZeroU8::MIN),
+            &val as *const i32,
+        ));
+
         let b = a.clone();
-        
-        let ptr = b.into_value()
-            .unwrap()
-            .load::<*const i32>();
+
+        let ptr = b.into_value().unwrap().load::<*const i32>();
         assert_eq!(unsafe { *ptr }, 1);
     }
-    
+
     #[test]
     fn test_clone_f64() {
         let a = RawBox::from_f64(1.0);
