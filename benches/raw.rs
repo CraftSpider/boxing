@@ -79,11 +79,11 @@ fn is_f64(c: &mut Criterion) {
     group
         .bench_function(
             BenchmarkId::from_parameter("0.0"),
-            |b| b.iter(|| black_box(&f0).is_f64()),
+            |b| b.iter(|| black_box(&f0).is_float()),
         )
         .bench_function(
             BenchmarkId::from_parameter("nan"),
-            |b| b.iter(|| black_box(&fnan).is_f64()),
+            |b| b.iter(|| black_box(&fnan).is_float()),
         )
         .bench_function(
             BenchmarkId::from_parameter("(RawTag(false, 1), [0; 6])"),
@@ -108,11 +108,11 @@ fn is_data(c: &mut Criterion) {
     group
         .bench_function(
             BenchmarkId::from_parameter("0.0"),
-            |b| b.iter(|| black_box(&f0).is_data()),
+            |b| b.iter(|| black_box(&f0).is_value()),
         )
         .bench_function(
             BenchmarkId::from_parameter("nan"),
-            |b| b.iter(|| black_box(&fnan).is_data()),
+            |b| b.iter(|| black_box(&fnan).is_value()),
         )
         .bench_function(
             BenchmarkId::from_parameter("(RawTag(false, 1), [0; 6])"),
@@ -137,11 +137,11 @@ fn into_f64(c: &mut Criterion) {
     group
         .bench_function(
             BenchmarkId::from_parameter("0.0"),
-            |b| b.iter(|| black_box(f0.clone()).into_f64().unwrap())
+            |b| b.iter(|| black_box(f0.clone()).into_float().unwrap())
         )
         .bench_function(
             BenchmarkId::from_parameter("nan"),
-            |b| b.iter(|| black_box(fnan.clone()).into_f64().unwrap())
+            |b| b.iter(|| black_box(fnan.clone()).into_float().unwrap())
         )
         .bench_function(
             BenchmarkId::from_parameter("(RawTag(false, 1), [0; 6])"),

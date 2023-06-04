@@ -25,7 +25,7 @@ impl RawStore for [u8; 6] {
     }
 
     fn from_val(value: &Value) -> Self {
-        value.data()
+        *value.data()
     }
 }
 
@@ -35,7 +35,7 @@ impl RawStore for bool {
     }
 
     fn from_val(value: &Value) -> Self {
-        value.ref_data()[0] == 1
+        value.data()[0] == 1
     }
 }
 
@@ -48,7 +48,7 @@ macro_rules! int_store {
             }
 
             fn from_val(value: &Value) -> Self {
-                <$ty>::from_ne_bytes(value.ref_data().truncate_to())
+                <$ty>::from_ne_bytes(value.data().truncate_to())
             }
         }
     };
@@ -79,7 +79,7 @@ fn store_ptr<P: Strict + Copy>(value: &mut Value, ptr: P) {
         );
 
         // SAFETY: We ensure pointer range will fit in 6 bytes, then mask it to match
-        let val = (unsafe { value.mut_whole() } as *mut [u8; 8]).cast::<P>();
+        let val = (unsafe { value.whole_mut() } as *mut [u8; 8]).cast::<P>();
 
         let ptr = Strict::map_addr(ptr, |addr| {
             addr | (usize::from(value.header().into_raw()) << 48)
@@ -100,7 +100,7 @@ fn load_ptr<P: Strict>(value: &Value) -> P {
     }
     #[cfg(target_pointer_width = "64")]
     {
-        let val = (unsafe { value.ref_whole() } as *const [u8; 8]).cast::<P>();
+        let val = (unsafe { value.whole() } as *const [u8; 8]).cast::<P>();
 
         let ptr = unsafe { val.read() };
         Strict::map_addr(ptr, |addr| addr & 0x0000_FFFF_FFFF_FFFF)
@@ -220,15 +220,15 @@ impl RawTag {
     }
 
     #[must_use]
-    pub fn val(self) -> u8 {
+    pub fn val(self) -> NonZeroU8 {
         match self.0 {
-            TagVal::_P1 | TagVal::_N1 => 1,
-            TagVal::_P2 | TagVal::_N2 => 2,
-            TagVal::_P3 | TagVal::_N3 => 3,
-            TagVal::_P4 | TagVal::_N4 => 4,
-            TagVal::_P5 | TagVal::_N5 => 5,
-            TagVal::_P6 | TagVal::_N6 => 6,
-            TagVal::_P7 | TagVal::_N7 => 7,
+            TagVal::_P1 | TagVal::_N1 => NonZeroU8::new(1).unwrap(),
+            TagVal::_P2 | TagVal::_N2 => NonZeroU8::new(2).unwrap(),
+            TagVal::_P3 | TagVal::_N3 => NonZeroU8::new(3).unwrap(),
+            TagVal::_P4 | TagVal::_N4 => NonZeroU8::new(4).unwrap(),
+            TagVal::_P5 | TagVal::_N5 => NonZeroU8::new(5).unwrap(),
+            TagVal::_P6 | TagVal::_N6 => NonZeroU8::new(6).unwrap(),
+            TagVal::_P7 | TagVal::_N7 => NonZeroU8::new(7).unwrap(),
         }
     }
 
@@ -262,7 +262,7 @@ impl fmt::Debug for RawTag {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 #[repr(transparent)]
 struct Header(u16);
 
@@ -273,7 +273,7 @@ impl Header {
     }
 
     fn tag(self) -> RawTag {
-        // SAFETY: tag is guaranteed in range 0-7, we already truncated it
+        // SAFETY: tag is guaranteed in range 1-7, we already truncated it and 0 never happens
         unsafe { RawTag::new_unchecked(self.get_sign(), self.get_tag()) }
     }
 
@@ -290,7 +290,7 @@ impl Header {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 #[repr(C, align(8))]
 pub struct Value {
     #[cfg(target_endian = "big")]
@@ -315,6 +315,10 @@ impl Value {
         v
     }
 
+    pub fn load<T: RawStore>(self) -> T {
+        T::from_val(&self)
+    }
+
     #[must_use]
     pub fn tag(&self) -> RawTag {
         self.header.tag()
@@ -329,24 +333,22 @@ impl Value {
     }
 
     #[must_use]
-    pub fn data(&self) -> [u8; 6] {
-        self.data
-    }
-
-    #[must_use]
-    pub fn ref_data(&self) -> &[u8; 6] {
+    pub fn data(&self) -> &[u8; 6] {
         &self.data
     }
 
-    pub fn mut_data(&mut self) -> &mut [u8; 6] {
+    #[must_use]
+    pub fn data_mut(&mut self) -> &mut [u8; 6] {
         &mut self.data
     }
 
-    unsafe fn ref_whole(&self) -> &[u8; 8] {
+    #[must_use]
+    unsafe fn whole(&self) -> &[u8; 8] {
         &*(self as *const Value).cast::<[u8; 8]>()
     }
 
-    unsafe fn mut_whole(&mut self) -> &mut [u8; 8] {
+    #[must_use]
+    unsafe fn whole_mut(&mut self) -> &mut [u8; 8] {
         &mut *(self as *mut Value).cast::<[u8; 8]>()
     }
 }
@@ -385,7 +387,7 @@ impl RawBox {
 
     #[must_use]
     pub fn tag(&self) -> Option<RawTag> {
-        if self.is_data() {
+        if self.is_value() {
             Some(unsafe { self.value.tag() })
         } else {
             None
@@ -393,18 +395,18 @@ impl RawBox {
     }
 
     #[must_use]
-    pub fn is_f64(&self) -> bool {
+    pub fn is_float(&self) -> bool {
         (unsafe { !self.float.is_nan() } || unsafe { self.bits & SIGN_MASK == QUIET_NAN })
     }
 
     #[must_use]
-    pub fn is_data(&self) -> bool {
+    pub fn is_value(&self) -> bool {
         (unsafe { self.float.is_nan() } && unsafe { self.bits & SIGN_MASK != QUIET_NAN })
     }
 
     #[must_use]
-    pub fn ref_f64(&self) -> Option<&f64> {
-        if self.is_f64() {
+    pub fn float(&self) -> Option<&f64> {
+        if self.is_float() {
             // SAFETY: If we pass the check, we contain a float, and since you can't write through
             //         a &f64, can't change this to be NAN and mess it up
             Some(unsafe { &self.float })
@@ -414,8 +416,8 @@ impl RawBox {
     }
 
     #[must_use]
-    pub fn mut_f64(&mut self) -> Option<&mut SingleNaNF64> {
-        if self.is_f64() {
+    pub fn float_mut(&mut self) -> Option<&mut SingleNaNF64> {
+        if self.is_float() {
             SingleNaNF64::from_mut(unsafe { &mut self.float })
         } else {
             None
@@ -423,8 +425,8 @@ impl RawBox {
     }
     
     #[must_use]
-    pub fn ref_val(&self) -> Option<&Value> {
-        if self.is_data() {
+    pub fn value(&self) -> Option<&Value> {
+        if self.is_value() {
             // SAFETY: If we pass the check, we contain NaN-boxed data, and can safely ourselves as
             //         a data value
             Some(unsafe { &self.value })
@@ -434,8 +436,8 @@ impl RawBox {
     }
     
     #[must_use]
-    pub fn mut_val(&mut self) -> Option<&mut Value> {
-        if self.is_data() {
+    pub fn value_mut(&mut self) -> Option<&mut Value> {
+        if self.is_value() {
             // SAFETY: If we pass the check, we contain NaN-boxed data, and can safely access
             //         the tail as raw bytes
             //         We ensure tag != 0 on creation to allow this, writing all 0 bytes to data
@@ -446,8 +448,8 @@ impl RawBox {
         }
     }
 
-    pub fn into_f64(self) -> Result<f64, Self> {
-        if self.is_f64() {
+    pub fn into_float(self) -> Result<f64, Self> {
+        if self.is_float() {
             // SAFETY: If we pass the check, we contain a float, and can pull it out
             Ok(unsafe { self.float })
         } else {
@@ -455,49 +457,12 @@ impl RawBox {
         }
     }
 
-    pub fn into_data(self) -> Result<(RawTag, [u8; 6]), Self> {
-        if self.is_data() {
+    pub fn into_value(self) -> Result<Value, Self> {
+        if self.is_value() {
             // SAFETY: If we pass the check, we contain raw data, and can pull it out
-            let val = unsafe { self.value };
-            Ok((val.header.tag(), val.data))
+            Ok(ManuallyDrop::into_inner(unsafe { self.value }))
         } else {
             Err(self)
-        }
-    }
-
-    pub fn into_val<T: RawStore>(self) -> Result<(RawTag, T), Self> {
-        if self.is_data() {
-            let val = unsafe { &self.value };
-            Ok((val.tag(), T::from_val(val)))
-        } else {
-            Err(self)
-        }
-    }
-
-    pub fn read<T>(&self, f: impl FnOnce(&Value) -> T) -> Option<T> {
-        if self.is_data() {
-            let val = unsafe { &self.value };
-            Some(f(val))
-        } else {
-            None
-        }
-    }
-
-    pub fn try_read<'a, T>(&'a self, f: impl FnOnce(&'a Value) -> Option<T>) -> Option<T> {
-        if self.is_data() {
-            let val = unsafe { &self.value };
-            f(val)
-        } else {
-            None
-        }
-    }
-    
-    pub fn try_read_mut<'a, T>(&'a mut self, f: impl FnOnce(&'a mut Value) -> Option<T>) -> Option<T> {
-        if self.is_data() {
-            let val = unsafe { &mut self.value };
-            f(val)
-        } else {
-            None
         }
     }
 }
@@ -510,18 +475,18 @@ impl Clone for RawBox {
 
 impl fmt::Debug for RawBox {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.ref_f64() {
+        match self.float() {
             Some(val) => {
                 f.debug_tuple("RawBox::Float")
                     .field(val)
                     .finish()
             }
             None => {
-                let val = self.ref_val().unwrap();
+                let val = self.value().unwrap();
                 
                 f.debug_struct("RawBox::Data")
                     .field("tag", &val.tag())
-                    .field("data", val.ref_data())
+                    .field("data", val.data())
                     .finish()
             }
         }
@@ -540,19 +505,19 @@ mod tests {
     #[test]
     fn test_roundtrip_float() {
         let a = RawBox::from_f64(1.0);
-        assert_eq!(a.into_f64().ok(), Some(1.0));
+        assert_eq!(a.into_float().ok(), Some(1.0));
 
         let b = RawBox::from_f64(-1.0);
-        assert_eq!(b.into_f64().ok(), Some(-1.0));
+        assert_eq!(b.into_float().ok(), Some(-1.0));
 
         let c = RawBox::from_f64(f64::NAN);
         assert!(c
-            .into_f64()
+            .into_float()
             .is_ok_and(|val| val.is_nan() && val.is_sign_positive()));
 
         let d = RawBox::from_f64(-f64::NAN);
         assert!(d
-            .into_f64()
+            .into_float()
             .is_ok_and(|val| val.is_nan() && val.is_sign_negative()));
     }
 
@@ -562,22 +527,22 @@ mod tests {
         let four = NonZeroU8::new(4).unwrap();
         let seven = NonZeroU8::new(7).unwrap();
 
-        let a = RawBox::from_value(Value::new(RawTag::new(false, one), [0; 6]));
-        assert_eq!(a.into_data().ok(), Some((RawTag::new(false, one), [0; 6])));
+        let a = RawBox::from_value(Value::empty(RawTag::new(false, one)));
+        assert_eq!(a.into_value().ok(), Some(Value::empty(RawTag::new(false, one))));
 
-        let b = RawBox::from_value(Value::new(RawTag::new(true, seven), [0; 6]));
-        assert_eq!(b.into_data().ok(), Some((RawTag::new(true, one), [0; 6])));
+        let b = RawBox::from_value(Value::empty(RawTag::new(true, seven)));
+        assert_eq!(b.into_value().ok(), Some(Value::empty(RawTag::new(true, seven))));
 
         let c = RawBox::from_value(Value::new(RawTag::new(false, seven), [0, 0, 0, 0, 0, 1]));
         assert_eq!(
-            c.into_data().ok(),
-            Some((RawTag::new(false, seven), [0, 0, 0, 0, 0, 1]))
+            c.into_value().ok(),
+            Some(Value::new(RawTag::new(false, seven), [0, 0, 0, 0, 0, 1]))
         );
 
         let d = RawBox::from_value(Value::new(RawTag::new(false, four), [0x80, 0, 0, 0, 0, 0]));
         assert_eq!(
-            d.into_data().ok(),
-            Some((RawTag::new(false, four), [0x80, 0, 0, 0, 0, 0]))
+            d.into_value().ok(),
+            Some(Value::new(RawTag::new(false, four), [0x80, 0, 0, 0, 0, 0]))
         );
     }
 
@@ -586,13 +551,13 @@ mod tests {
         let one = NonZeroU8::MIN;
 
         let a = RawBox::from_value(Value::store(RawTag::new(false, one), 0u32));
-        assert!(matches!(a.into_val(), Ok((_, 0u32))));
+        assert_eq!(a.into_value().unwrap().load::<u32>(), 0u32);
 
         let b = RawBox::from_value(Value::store(RawTag::new(false, one), 1u32));
-        assert!(matches!(b.into_val(), Ok((_, 1u32))));
+        assert_eq!(b.into_value().unwrap().load::<u32>(), 1u32);
 
         let c = RawBox::from_value(Value::store(RawTag::new(false, one), 0xFFFF_FFFFu32));
-        assert!(matches!(c.into_val(), Ok((_, 0xFFFF_FFFFu32))));
+        assert_eq!(c.into_value().unwrap().load::<u32>(), 0xFFFF_FFFFu32);
     }
 
     #[test]
@@ -600,13 +565,13 @@ mod tests {
         let one = NonZeroU8::MIN;
 
         let a = RawBox::from_value(Value::store(RawTag::new(false, one), 0i32));
-        assert!(matches!(a.into_val(), Ok((_, 0i32))));
+        assert_eq!(a.into_value().unwrap().load::<i32>(), 0i32);
 
         let b = RawBox::from_value(Value::store(RawTag::new(false, one), 1i32));
-        assert!(matches!(b.into_val(), Ok((_, 1i32))));
+        assert_eq!(b.into_value().unwrap().load::<i32>(), 1i32);
 
         let c = RawBox::from_value(Value::store(RawTag::new(false, one), -1i32));
-        assert!(matches!(c.into_val(), Ok((_, -1i32))));
+        assert_eq!(c.into_value().unwrap().load::<i32>(), -1i32);
     }
 
     #[test]
@@ -615,13 +580,12 @@ mod tests {
         let ptr = &mut *data as *mut i32;
 
         let a = RawBox::from_value(Value::store(RawTag::new(false, NonZeroU8::MIN), ptr));
-        let out = a.into_val::<*mut i32>().unwrap();
-        assert_eq!(out, (RawTag::new(false, NonZeroU8::MIN), ptr));
+        let new_ptr = a.into_value().unwrap().load::<*mut i32>();
+        assert_eq!(new_ptr, ptr);
 
         // Check that we can still read/write through the pointer
-        let ptr = out.1;
-        assert_eq!(unsafe { *ptr }, 1);
-        unsafe { *ptr = 2 };
+        assert_eq!(unsafe { *new_ptr }, 1);
+        unsafe { *new_ptr = 2 };
 
         assert_eq!(*data, 2);
     }
@@ -636,9 +600,9 @@ mod tests {
         
         let b = a.clone();
         
-        let ptr = b.into_val::<*const i32>()
+        let ptr = b.into_value()
             .unwrap()
-            .1;
+            .load::<*const i32>();
         assert_eq!(unsafe { *ptr }, 1);
     }
     
@@ -646,6 +610,6 @@ mod tests {
     fn test_clone_f64() {
         let a = RawBox::from_f64(1.0);
         let b = a.clone();
-        assert_eq!(b.into_f64().ok(), Some(1.0));
+        assert_eq!(b.into_float().ok(), Some(1.0));
     }
 }

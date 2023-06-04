@@ -43,9 +43,9 @@ fn write_int<I: IntInline>(val: I) -> [u8; 6] {
     return [val[0], val[1], val[2], val[3], ty[0], ty[1]];
 }
 
-fn read_int<I: IntInline>(bytes: [u8; 6]) -> Option<I> {
-    let ty = int_ty(&bytes);
-    let data = int_data(&bytes);
+fn read_int<I: IntInline>(bytes: &[u8; 6]) -> Option<I> {
+    let ty = int_ty(bytes);
+    let data = int_data(bytes);
     
     if ty == I::ty() {
         // SAFETY: Data is guaranteed valid for I, since the type is that of I, and 4-byte aligned
@@ -79,7 +79,7 @@ impl HeapType {
             return None;
         }
 
-        Some(match tag.val() {
+        Some(match tag.val().get() {
             1 => HeapType::Int,
             2 => HeapType::Ptr,
             3 => HeapType::MutPtr,
@@ -156,8 +156,8 @@ pub trait HeapInlineRef<T>: HeapInline<T> {
 
 impl<T, I: HeapInline<T> + IntInline> HeapInlineRef<T> for I {
     fn try_ref(value: &Value) -> Option<&Self> {
-        let ty = int_ty(value.ref_data());
-        let data = int_data(value.ref_data());
+        let ty = int_ty(value.data());
+        let data = int_data(value.data());
         if ty == <Self as IntInline>::ty() {
             // SAFETY: Since types match, data is a valid instance of Self
             Some(unsafe { I::ref_bytes(data) })
@@ -167,8 +167,8 @@ impl<T, I: HeapInline<T> + IntInline> HeapInlineRef<T> for I {
     }
 
     fn try_mut(value: &mut Value) -> Option<&mut Self> {
-        let ty = int_ty(value.ref_data());
-        let data = int_data_mut(value.mut_data());
+        let ty = int_ty(value.data());
+        let data = int_data_mut(value.data_mut());
         if ty == <Self as IntInline>::ty() {
             // SAFETY: Since types match, data is a valid instance of Self
             Some(unsafe { I::mut_bytes(data) })
@@ -349,17 +349,17 @@ impl<'a, T> NanBox<'a, T> {
 
     #[must_use]
     pub fn try_ref_f64(&self) -> Option<&f64> {
-        self.0.ref_f64()
+        self.0.float()
     }
 
     #[must_use]
     pub fn try_mut_f64(&mut self) -> Option<&mut SingleNaNF64> {
-        self.0.mut_f64()
+        self.0.float_mut()
     }
     
     #[must_use]
     pub fn try_ref_inline<U: HeapInlineRef<T> + 'a>(&self) -> Option<&U> {
-        self.0.try_read(|val| {
+        self.0.value().and_then(|val| {
             if HeapType::from_raw_tag(val.tag()) == Some(<U as HeapInline<_>>::ty()) {
                 U::try_ref(val)
             } else {
@@ -370,7 +370,7 @@ impl<'a, T> NanBox<'a, T> {
     
     #[must_use]
     pub fn try_mut_inline<U: HeapInlineRef<T> + 'a>(&mut self) -> Option<&mut U> {
-        self.0.try_read_mut(|val| {
+        self.0.value_mut().and_then(|val| {
             if HeapType::from_raw_tag(val.tag()) == Some(<U as HeapInline<_>>::ty()) {
                 U::try_mut(val)
             } else {
@@ -381,7 +381,7 @@ impl<'a, T> NanBox<'a, T> {
     
     #[must_use]
     pub fn try_ref_boxed(&self) -> Option<&T> {
-        self.0.try_read(|val| {
+        self.0.value().and_then(|val| {
             if HeapType::from_raw_tag(val.tag()) == Some(HeapType::Box) {
                 let ptr = <*const T as RawStore>::from_val(val);
                 // SAFETY: Type is Box, so inner value is owned by us and can be referenced matching us
@@ -394,7 +394,7 @@ impl<'a, T> NanBox<'a, T> {
 
     #[must_use]
     pub fn try_mut_boxed(&mut self) -> Option<&mut T> {
-        self.0.try_read_mut(|val| {
+        self.0.value_mut().and_then(|val| {
             if HeapType::from_raw_tag(val.tag()) == Some(HeapType::Box) {
                 let ptr = <*mut T as RawStore>::from_val(val);
                 // SAFETY: Type is Box, so inner value is owned by us and can be referenced matching us
@@ -405,16 +405,15 @@ impl<'a, T> NanBox<'a, T> {
         })
     }
 
-    pub fn try_into_f64(mut self) -> Result<f64, Self> {
-        let inner = mem::replace(&mut self.0, RawBox::from_f64(f64::NAN));
-        inner.into_f64().map_err(NanBox::from_raw)
+    pub fn try_into_f64(self) -> Result<f64, Self> {
+        self.0.float().copied().ok_or(self)
     }
 
     pub fn try_into_inline<U: HeapInline<T> + 'a>(self) -> Result<U, Self> {
-        self.0.try_read(|val| {
+        self.0.value().and_then(|val| {
             if HeapType::from_raw_tag(val.tag()) == Some(U::ty()) {
                 // SAFETY: We just checked that the type matches, so this is sound
-                unsafe { U::try_read(val) }
+                unsafe { U::try_read(&val) }
             } else {
                 None
             }
@@ -422,23 +421,17 @@ impl<'a, T> NanBox<'a, T> {
     }
 
     pub fn try_into_boxed(mut self) -> Result<T, Self> {
-        let out = self.0.try_read(|val| {
-            if HeapType::from_raw_tag(val.tag()) == Some(HeapType::Box) {
-                let ptr = <*mut T as RawStore>::from_val(val);
-                // SAFETY: Since type matches, this value was leaked from a box
-                Some(unsafe { *Box::from_raw(ptr) })
-            } else {
-                None
-            }
-        });
+        let inner = mem::replace(&mut self.0, RawBox::from_f64(f64::NAN));
 
-        match out {
-            Some(val) => {
-                self.0 = RawBox::from_f64(f64::NAN);
-                Ok(val)
+        inner.into_value().and_then(|val| {
+            if HeapType::from_raw_tag(val.tag()) == Some(HeapType::Box) {
+                let ptr = val.load::<*mut T>();
+                // SAFETY: Since type matches, this value was leaked from a box
+                Ok(unsafe { *Box::from_raw(ptr) })
+            } else {
+                Err(RawBox::from_value(val))
             }
-            None => Err(self),
-        }
+        }).map_err(NanBox::from_raw)
     }
 }
 
@@ -450,17 +443,17 @@ where
         let tag = self.0.tag().and_then(HeapType::from_raw_tag);
 
         match tag {
-            None => NanBox::from_f64(*self.0.ref_f64().unwrap()),
+            None => NanBox::from_f64(*self.0.float().unwrap()),
             Some(HeapType::Int) => {
-                let data = self.0.ref_val().unwrap().ref_data();
+                let data = self.0.value().unwrap().data();
                 NanBox::from_raw(RawBox::from_value(Value::new(HeapType::Int.raw_tag(), *data)))
             }
             Some(tag @ (HeapType::Ptr | HeapType::MutPtr | HeapType::Ref)) => {
-                let ptr = self.0.read(<*const T>::from_val).unwrap();
+                let ptr = self.0.value().map(<*const T>::from_val).unwrap();
                 NanBox::from_raw(RawBox::from_value(Value::store(tag.raw_tag(), ptr)))
             }
             Some(HeapType::Box) => {
-                let ptr = self.0.read(<*const T>::from_val).unwrap();
+                let ptr = self.0.value().map(<*const T>::from_val).unwrap();
                 // SAFETY: Since type is Box, we know inner value is uniquely owned by us
                 let r = unsafe { &*ptr };
                 NanBox::from_box(Box::new(T::clone(r)))
@@ -479,14 +472,14 @@ where
         }
 
         match self.0.tag().and_then(HeapType::from_raw_tag) {
-            None => self.0.ref_f64() == other.0.ref_f64(),
+            None => self.0.float() == other.0.float(),
             Some(HeapType::Int | HeapType::Ptr | HeapType::MutPtr) => {
-                self.0.ref_val().map(Value::ref_data) == other.0.ref_val().map(Value::ref_data)
+                self.0.value().map(Value::data) == other.0.value().map(Value::data)
             },
             Some(HeapType::Ref | HeapType::Box) => {
-                let ptr1 = self.0.read(<*const T>::from_val)
+                let ptr1 = self.0.value().map(<*const T>::from_val)
                     .unwrap();
-                let ptr2 = other.0.read(<*const T>::from_val)
+                let ptr2 = other.0.value().map(<*const T>::from_val)
                     .unwrap();
 
                 // SAFETY: Type matches, and both Ref and Box guarantee our inner value is sound
@@ -507,7 +500,7 @@ where
         let variant = match tag {
             None => "NanBox::Float",
             Some(HeapType::Int) => {
-                let ty = int_ty(self.0.ref_val().unwrap().ref_data());
+                let ty = int_ty(self.0.value().unwrap().data());
                 match ty {
                     IntType::Bool => "NanBox::Bool",
                     IntType::Char => "NanBox::Char",
@@ -529,11 +522,11 @@ where
 
         match tag {
             None => {
-                let val = self.0.ref_f64().unwrap();
+                let val = self.0.float().unwrap();
                 tuple.field(val);
             }
             Some(HeapType::Int) => {
-                let bytes = self.0.ref_val().unwrap().ref_data();
+                let bytes = self.0.value().unwrap().data();
                 let ty = int_ty(bytes);
                 let data = int_data(bytes);
                 match ty {
@@ -556,12 +549,12 @@ where
                 };
             }
             Some(HeapType::Ptr | HeapType::MutPtr) => {
-                let ptr = self.0.read(<*const T>::from_val)
+                let ptr = self.0.value().map(<*const T>::from_val)
                     .unwrap();
                 tuple.field(&ptr);
             }
             Some(HeapType::Ref | HeapType::Box) => {
-                let ptr = self.0.read(<*const T>::from_val)
+                let ptr = self.0.value().map(<*const T>::from_val)
                     .unwrap();
                 let r = unsafe { &*ptr };
                 tuple.field(r);
@@ -575,7 +568,7 @@ where
 impl<'a, T> Drop for NanBox<'a, T> {
     fn drop(&mut self) {
         if self.0.tag().and_then(HeapType::from_raw_tag) == Some(HeapType::Box) {
-            let ptr = self.0.read(<*mut T>::from_val).unwrap();
+            let ptr = self.0.value().map(<*mut T>::from_val).unwrap();
             drop(unsafe { Box::from_raw(ptr) });
         }
     }
