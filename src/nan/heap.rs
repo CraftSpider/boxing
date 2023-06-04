@@ -3,6 +3,7 @@ use crate::nan::{RawBox, SingleNaNF64};
 use crate::utils::ArrayExt;
 use std::marker::PhantomData;
 use std::{fmt, mem};
+use std::num::NonZeroU8;
 use std::ops::Deref;
 
 fn int_ty(bytes: impl Deref<Target = [u8; 6]>) -> IntType {
@@ -69,7 +70,8 @@ pub enum HeapType {
 
 impl HeapType {
     fn raw_tag(self) -> RawTag {
-        RawTag::new(false, self as u8)
+        // SAFETY: `HeapType` discriminant is in the range 1..7
+        RawTag::new(false, unsafe { NonZeroU8::new_unchecked(self as u8) })
     }
 
     fn from_raw_tag(tag: RawTag) -> Option<HeapType> {
@@ -331,16 +333,17 @@ impl<'a, T> NanBox<'a, T> {
     #[must_use]
     pub fn from_inline<U: HeapInline<T> + 'a>(val: U) -> NanBox<'a, T> {
         let ty = U::ty();
-        let raw = RawBox::write(ty.raw_tag(), |b| U::write(val, b)).unwrap();
+        let mut value = Value::empty(ty.raw_tag());
+        U::write(val, &mut value);
+        let raw = RawBox::from_value(value);
         NanBox::from_raw(raw)
     }
 
     #[must_use]
     pub fn from_box(val: Box<T>) -> NanBox<'a, T> {
-        let raw = RawBox::write(HeapType::Box.raw_tag(), |v| {
-            <*mut T as RawStore>::to_val(Box::into_raw(val), v)
-        })
-        .unwrap();
+        let tag = HeapType::Box.raw_tag();
+        let value = Value::store(tag, Box::into_raw(val));
+        let raw = RawBox::from_value(value);
         NanBox::from_raw(raw)
     }
 
@@ -450,13 +453,11 @@ where
             None => NanBox::from_f64(*self.0.ref_f64().unwrap()),
             Some(HeapType::Int) => {
                 let data = self.0.ref_val().unwrap().ref_data();
-                NanBox::from_raw(RawBox::from_data(HeapType::Int.raw_tag(), *data).unwrap())
+                NanBox::from_raw(RawBox::from_value(Value::new(HeapType::Int.raw_tag(), *data)))
             }
             Some(tag @ (HeapType::Ptr | HeapType::MutPtr | HeapType::Ref)) => {
                 let ptr = self.0.read(<*const T>::from_val).unwrap();
-                NanBox::from_raw(
-                    RawBox::write(tag.raw_tag(), |w| <*const T>::to_val(ptr, w)).unwrap(),
-                )
+                NanBox::from_raw(RawBox::from_value(Value::store(tag.raw_tag(), ptr)))
             }
             Some(HeapType::Box) => {
                 let ptr = self.0.read(<*const T>::from_val).unwrap();
@@ -503,7 +504,7 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let tag = self.0.tag().and_then(HeapType::from_raw_tag);
 
-        let var = match tag {
+        let variant = match tag {
             None => "NanBox::Float",
             Some(HeapType::Int) => {
                 let ty = int_ty(self.0.ref_val().unwrap().ref_data());
@@ -524,7 +525,7 @@ where
             Some(HeapType::Box) => "NanBox::Box",
         };
 
-        let mut tuple = f.debug_tuple(var);
+        let mut tuple = f.debug_tuple(variant);
 
         match tag {
             None => {

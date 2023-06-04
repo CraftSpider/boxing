@@ -3,6 +3,8 @@ use crate::nan::singlenan::SingleNaNF64;
 use crate::utils::ArrayExt;
 use sptr::Strict;
 use std::fmt;
+use std::mem::ManuallyDrop;
+use std::num::NonZeroU8;
 
 /// Types that can be easily stored in a [`RawBox`]. This trait is implemented for some common
 /// base types that people may want to store, that have 'obvious' ways to write them into storage
@@ -80,7 +82,7 @@ fn store_ptr<P: Strict + Copy>(value: &mut Value, ptr: P) {
         let val = (unsafe { value.mut_whole() } as *mut [u8; 8]).cast::<P>();
 
         let ptr = Strict::map_addr(ptr, |addr| {
-            addr | ((value.header().into_raw() as usize) << 48)
+            addr | (usize::from(value.header().into_raw()) << 48)
         });
 
         unsafe { val.write(ptr) };
@@ -127,7 +129,6 @@ impl<T> RawStore for *mut T {
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum TagVal {
-    _P0,
     _P1,
     _P2,
     _P3,
@@ -136,7 +137,6 @@ enum TagVal {
     _P6,
     _P7,
 
-    _N0,
     _N1,
     _N2,
     _N3,
@@ -151,15 +151,14 @@ pub struct RawTag(TagVal);
 
 impl RawTag {
     #[must_use]
-    pub fn new(neg: bool, val: u8) -> RawTag {
+    pub fn new(neg: bool, val: NonZeroU8) -> RawTag {
         // SAFETY: Value truncated into range 0-7
-        unsafe { Self::new_unchecked(neg, val & 0x07) }
+        unsafe { Self::new_unchecked(neg, val.get() & 0x07) }
     }
 
     #[must_use]
     pub fn new_checked(neg: bool, val: u8) -> Option<RawTag> {
         Some(RawTag(match (neg, val) {
-            (false, 0) => TagVal::_P0,
             (false, 1) => TagVal::_P1,
             (false, 2) => TagVal::_P2,
             (false, 3) => TagVal::_P3,
@@ -168,7 +167,6 @@ impl RawTag {
             (false, 6) => TagVal::_P6,
             (false, 7) => TagVal::_P7,
 
-            (true, 0) => TagVal::_N0,
             (true, 1) => TagVal::_N1,
             (true, 2) => TagVal::_N2,
             (true, 3) => TagVal::_N3,
@@ -183,11 +181,10 @@ impl RawTag {
 
     /// # Safety
     ///
-    /// `val` must be in the range `0..8`
+    /// `val` must be in the range `1..8`
     #[must_use]
     pub unsafe fn new_unchecked(neg: bool, val: u8) -> RawTag {
         RawTag(match (neg, val) {
-            (false, 0) => TagVal::_P0,
             (false, 1) => TagVal::_P1,
             (false, 2) => TagVal::_P2,
             (false, 3) => TagVal::_P3,
@@ -196,7 +193,6 @@ impl RawTag {
             (false, 6) => TagVal::_P6,
             (false, 7) => TagVal::_P7,
 
-            (true, 0) => TagVal::_N0,
             (true, 1) => TagVal::_N1,
             (true, 2) => TagVal::_N2,
             (true, 3) => TagVal::_N3,
@@ -213,7 +209,6 @@ impl RawTag {
     pub fn is_neg(self) -> bool {
         matches!(
             self.0,
-            TagVal::_N0
                 | TagVal::_N1
                 | TagVal::_N2
                 | TagVal::_N3
@@ -227,7 +222,6 @@ impl RawTag {
     #[must_use]
     pub fn val(self) -> u8 {
         match self.0 {
-            TagVal::_P0 | TagVal::_N0 => 0,
             TagVal::_P1 | TagVal::_N1 => 1,
             TagVal::_P2 | TagVal::_N2 => 2,
             TagVal::_P3 | TagVal::_N3 => 3,
@@ -241,7 +235,6 @@ impl RawTag {
     #[must_use]
     pub fn neg_val(self) -> (bool, u8) {
         match self.0 {
-            TagVal::_P0 => (false, 0),
             TagVal::_P1 => (false, 1),
             TagVal::_P2 => (false, 2),
             TagVal::_P3 => (false, 3),
@@ -249,7 +242,6 @@ impl RawTag {
             TagVal::_P5 => (false, 5),
             TagVal::_P6 => (false, 6),
             TagVal::_P7 => (false, 7),
-            TagVal::_N0 => (true, 0),
             TagVal::_N1 => (true, 1),
             TagVal::_N2 => (true, 2),
             TagVal::_N3 => (true, 3),
@@ -298,17 +290,31 @@ impl Header {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 #[repr(C, align(8))]
 pub struct Value {
     #[cfg(target_endian = "big")]
     header: Header,
-    value: [u8; 6],
+    data: [u8; 6],
     #[cfg(target_endian = "little")]
     header: Header,
 }
 
 impl Value {
+    pub fn new(tag: RawTag, data: [u8; 6]) -> Value {
+        Value { header: Header::new(tag), data }
+    }
+
+    pub fn empty(tag: RawTag) -> Value {
+        Value::new(tag, [0; 6])
+    }
+
+    pub fn store<T: RawStore>(tag: RawTag, val: T) -> Value {
+        let mut v = Value::new(tag, [0; 6]);
+        T::to_val(val, &mut v);
+        v
+    }
+
     #[must_use]
     pub fn tag(&self) -> RawTag {
         self.header.tag()
@@ -319,21 +325,21 @@ impl Value {
     }
 
     pub fn set_data(&mut self, val: [u8; 6]) {
-        self.value = val;
+        self.data = val;
     }
 
     #[must_use]
     pub fn data(&self) -> [u8; 6] {
-        self.value
+        self.data
     }
 
     #[must_use]
     pub fn ref_data(&self) -> &[u8; 6] {
-        &self.value
+        &self.data
     }
 
     pub fn mut_data(&mut self) -> &mut [u8; 6] {
-        &mut self.value
+        &mut self.data
     }
 
     unsafe fn ref_whole(&self) -> &[u8; 8] {
@@ -349,9 +355,11 @@ impl Value {
 /// A simple 'raw' NaN-boxed type, which provides no type checking of its own,
 #[repr(C)]
 pub union RawBox {
-    bits: u64,
     float: f64,
-    val: Value,
+    value: ManuallyDrop<Value>,
+
+    // Used for comparisons
+    bits: u64,
     // Used when cloning, to preserve provenance
     ptr: *const (),
 }
@@ -371,37 +379,14 @@ impl RawBox {
     }
 
     #[must_use]
-    pub fn from_data(tag: RawTag, value: [u8; 6]) -> Option<RawBox> {
-        if tag.val() == 0 {
-            None
-        } else {
-            Some(RawBox {
-                val: Value {
-                    header: Header::new(tag),
-                    value,
-                },
-            })
-        }
-    }
-
-    #[must_use]
-    pub fn from_val<T: RawStore>(tag: RawTag, val: T) -> Option<RawBox> {
-        let mut out = Self::from_data(tag, [0; 6])?;
-        T::to_val(val, unsafe { &mut out.val });
-        Some(out)
-    }
-
-    #[must_use]
-    pub fn write(tag: RawTag, f: impl FnOnce(&mut Value)) -> Option<RawBox> {
-        let mut out = Self::from_data(tag, [0; 6])?;
-        f(unsafe { &mut out.val });
-        Some(out)
+    pub fn from_value(value: Value) -> RawBox {
+        RawBox { value: ManuallyDrop::new(value) }
     }
 
     #[must_use]
     pub fn tag(&self) -> Option<RawTag> {
         if self.is_data() {
-            Some(unsafe { self.val.tag() })
+            Some(unsafe { self.value.tag() })
         } else {
             None
         }
@@ -442,7 +427,7 @@ impl RawBox {
         if self.is_data() {
             // SAFETY: If we pass the check, we contain NaN-boxed data, and can safely ourselves as
             //         a data value
-            Some(unsafe { &self.val })
+            Some(unsafe { &self.value })
         } else {
             None
         }
@@ -455,7 +440,7 @@ impl RawBox {
             //         the tail as raw bytes
             //         We ensure tag != 0 on creation to allow this, writing all 0 bytes to data
             //         can never break our invariants.
-            Some(unsafe { &mut self.val })
+            Some(unsafe { &mut self.value })
         } else {
             None
         }
@@ -473,8 +458,8 @@ impl RawBox {
     pub fn into_data(self) -> Result<(RawTag, [u8; 6]), Self> {
         if self.is_data() {
             // SAFETY: If we pass the check, we contain raw data, and can pull it out
-            let val = unsafe { self.val };
-            Ok((val.header.tag(), val.value))
+            let val = unsafe { self.value };
+            Ok((val.header.tag(), val.data))
         } else {
             Err(self)
         }
@@ -482,7 +467,7 @@ impl RawBox {
 
     pub fn into_val<T: RawStore>(self) -> Result<(RawTag, T), Self> {
         if self.is_data() {
-            let val = unsafe { &self.val };
+            let val = unsafe { &self.value };
             Ok((val.tag(), T::from_val(val)))
         } else {
             Err(self)
@@ -491,7 +476,7 @@ impl RawBox {
 
     pub fn read<T>(&self, f: impl FnOnce(&Value) -> T) -> Option<T> {
         if self.is_data() {
-            let val = unsafe { &self.val };
+            let val = unsafe { &self.value };
             Some(f(val))
         } else {
             None
@@ -500,7 +485,7 @@ impl RawBox {
 
     pub fn try_read<'a, T>(&'a self, f: impl FnOnce(&'a Value) -> Option<T>) -> Option<T> {
         if self.is_data() {
-            let val = unsafe { &self.val };
+            let val = unsafe { &self.value };
             f(val)
         } else {
             None
@@ -509,7 +494,7 @@ impl RawBox {
     
     pub fn try_read_mut<'a, T>(&'a mut self, f: impl FnOnce(&'a mut Value) -> Option<T>) -> Option<T> {
         if self.is_data() {
-            let val = unsafe { &mut self.val };
+            let val = unsafe { &mut self.value };
             f(val)
         } else {
             None
@@ -530,7 +515,6 @@ impl fmt::Debug for RawBox {
                 f.debug_tuple("RawBox::Float")
                     .field(val)
                     .finish()
-                
             }
             None => {
                 let val = self.ref_val().unwrap();
@@ -573,62 +557,55 @@ mod tests {
     }
 
     #[test]
-    fn test_roundtrip_raw() {
-        let a = RawBox::from_data(RawTag::new(false, 1), [0; 6]).unwrap();
-        assert_eq!(a.into_data().ok(), Some((RawTag::new(false, 1), [0; 6])));
+    fn test_roundtrip_value() {
+        let one = NonZeroU8::new(1).unwrap();
+        let four = NonZeroU8::new(4).unwrap();
+        let seven = NonZeroU8::new(7).unwrap();
 
-        let b = RawBox::from_data(RawTag::new(true, 1), [0; 6]).unwrap();
-        assert_eq!(b.into_data().ok(), Some((RawTag::new(true, 1), [0; 6])));
+        let a = RawBox::from_value(Value::new(RawTag::new(false, one), [0; 6]));
+        assert_eq!(a.into_data().ok(), Some((RawTag::new(false, one), [0; 6])));
 
-        let c = RawBox::from_data(RawTag::new(false, 7), [0, 0, 0, 0, 0, 1]).unwrap();
+        let b = RawBox::from_value(Value::new(RawTag::new(true, seven), [0; 6]));
+        assert_eq!(b.into_data().ok(), Some((RawTag::new(true, one), [0; 6])));
+
+        let c = RawBox::from_value(Value::new(RawTag::new(false, seven), [0, 0, 0, 0, 0, 1]));
         assert_eq!(
             c.into_data().ok(),
-            Some((RawTag::new(false, 7), [0, 0, 0, 0, 0, 1]))
+            Some((RawTag::new(false, seven), [0, 0, 0, 0, 0, 1]))
         );
 
-        let d = RawBox::from_data(RawTag::new(false, 4), [0x80, 0, 0, 0, 0, 0]).unwrap();
+        let d = RawBox::from_value(Value::new(RawTag::new(false, four), [0x80, 0, 0, 0, 0, 0]));
         assert_eq!(
             d.into_data().ok(),
-            Some((RawTag::new(false, 4), [0x80, 0, 0, 0, 0, 0]))
+            Some((RawTag::new(false, four), [0x80, 0, 0, 0, 0, 0]))
         );
-    }
-
-    #[test]
-    fn test_invalid_raw() {
-        let a = RawBox::from_data(RawTag::new(false, 0), [0; 6]);
-        assert!(matches!(a, None));
-
-        let b = RawBox::from_data(RawTag::new(true, 0), [0; 6]);
-        assert!(matches!(b, None));
-
-        let c = RawBox::from_data(RawTag::new(false, 0), [0, 0, 0, 0, 0, 1]);
-        assert!(matches!(c, None));
-
-        let d = RawBox::from_data(RawTag::new(false, 0), [0x80, 0, 0, 0, 0, 0]);
-        assert!(matches!(d, None));
     }
 
     #[test]
     fn test_roundtrip_u32() {
-        let a = RawBox::from_val(RawTag::new(false, 1), 0u32).unwrap();
+        let one = NonZeroU8::MIN;
+
+        let a = RawBox::from_value(Value::store(RawTag::new(false, one), 0u32));
         assert!(matches!(a.into_val(), Ok((_, 0u32))));
 
-        let b = RawBox::from_val(RawTag::new(false, 1), 1u32).unwrap();
+        let b = RawBox::from_value(Value::store(RawTag::new(false, one), 1u32));
         assert!(matches!(b.into_val(), Ok((_, 1u32))));
 
-        let c = RawBox::from_val(RawTag::new(false, 1), 0xFFFF_FFFFu32).unwrap();
+        let c = RawBox::from_value(Value::store(RawTag::new(false, one), 0xFFFF_FFFFu32));
         assert!(matches!(c.into_val(), Ok((_, 0xFFFF_FFFFu32))));
     }
 
     #[test]
     fn test_roundtrip_i32() {
-        let a = RawBox::from_val(RawTag::new(false, 1), 0i32).unwrap();
+        let one = NonZeroU8::MIN;
+
+        let a = RawBox::from_value(Value::store(RawTag::new(false, one), 0i32));
         assert!(matches!(a.into_val(), Ok((_, 0i32))));
 
-        let b = RawBox::from_val(RawTag::new(false, 1), 1i32).unwrap();
+        let b = RawBox::from_value(Value::store(RawTag::new(false, one), 1i32));
         assert!(matches!(b.into_val(), Ok((_, 1i32))));
 
-        let c = RawBox::from_val(RawTag::new(false, 1), -1i32).unwrap();
+        let c = RawBox::from_value(Value::store(RawTag::new(false, one), -1i32));
         assert!(matches!(c.into_val(), Ok((_, -1i32))));
     }
 
@@ -637,9 +614,9 @@ mod tests {
         let mut data = Box::new(1);
         let ptr = &mut *data as *mut i32;
 
-        let a = RawBox::from_val(RawTag::new(false, 1), ptr).unwrap();
+        let a = RawBox::from_value(Value::store(RawTag::new(false, NonZeroU8::MIN), ptr));
         let out = a.into_val::<*mut i32>().unwrap();
-        assert_eq!(out, (RawTag::new(false, 1), ptr));
+        assert_eq!(out, (RawTag::new(false, NonZeroU8::MIN), ptr));
 
         // Check that we can still read/write through the pointer
         let ptr = out.1;
@@ -655,8 +632,7 @@ mod tests {
         
         let val = 1;
         
-        let a = RawBox::from_val(RawTag::new(false, 1), &val as *const i32)
-            .unwrap();
+        let a = RawBox::from_value(Value::store(RawTag::new(false, NonZeroU8::MIN), &val as *const i32));
         
         let b = a.clone();
         
