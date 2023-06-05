@@ -71,7 +71,10 @@ fn is_float(c: &mut Criterion) {
     let f0 = RawBox::from_float(0.0);
     let fnan = RawBox::from_float(f64::NAN);
     let d0 = RawBox::from_value(Value::new(RawTag::new(false, NonZeroU8::MIN), [0; 6]));
-    let dfull = RawBox::from_value(Value::new(RawTag::new(true, NonZeroU8::new(7).unwrap()), [255; 6]));
+    let dfull = RawBox::from_value(Value::new(
+        RawTag::new(true, NonZeroU8::new(7).unwrap()),
+        [255; 6],
+    ));
 
     group
         .bench_function(BenchmarkId::from_parameter("0.0"), |b| {
@@ -96,7 +99,10 @@ fn is_data(c: &mut Criterion) {
     let f0 = RawBox::from_float(0.0);
     let fnan = RawBox::from_float(f64::NAN);
     let d0 = RawBox::from_value(Value::new(RawTag::new(false, NonZeroU8::MIN), [0; 6]));
-    let dfull = RawBox::from_value(Value::new(RawTag::new(true, NonZeroU8::new(7).unwrap()), [255; 6]));
+    let dfull = RawBox::from_value(Value::new(
+        RawTag::new(true, NonZeroU8::new(7).unwrap()),
+        [255; 6],
+    ));
 
     group
         .bench_function(BenchmarkId::from_parameter("0.0"), |b| {
@@ -121,7 +127,10 @@ fn into_float(c: &mut Criterion) {
     let f0 = RawBox::from_float(0.0);
     let fnan = RawBox::from_float(f64::NAN);
     let valf1 = RawBox::from_value(Value::new(RawTag::new(false, NonZeroU8::MIN), [0; 6]));
-    let valt7 = RawBox::from_value(Value::new(RawTag::new(true, NonZeroU8::new(7).unwrap()), [255; 6]));
+    let valt7 = RawBox::from_value(Value::new(
+        RawTag::new(true, NonZeroU8::new(7).unwrap()),
+        [255; 6],
+    ));
 
     group
         .bench_function(BenchmarkId::from_parameter("0.0"), |b| {
