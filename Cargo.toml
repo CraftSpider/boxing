@@ -25,5 +25,9 @@ debug = true
 name = "raw"
 harness = false
 
+[[bench]]
+name = "heap"
+harness = false
+
 [package.metadata.docs.rs]
 rustdoc-args = ["--extend-css", "doc/extra.css"]
