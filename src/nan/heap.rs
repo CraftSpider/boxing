@@ -38,6 +38,7 @@ mod sealed {
 
 use sealed::{HeapInlineSealed, HeapType};
 
+#[inline]
 fn int_ty(bytes: impl Deref<Target = [u8; 6]>) -> IntType {
     #[cfg(target_endian = "big")]
     let ty = u16::from_ne_bytes([bytes[0], bytes[1]]);
@@ -46,6 +47,7 @@ fn int_ty(bytes: impl Deref<Target = [u8; 6]>) -> IntType {
     IntType::from_u16(ty)
 }
 
+#[inline]
 fn int_data(bytes: &[u8; 6]) -> &[u8; 4] {
     #[cfg(target_endian = "big")]
     // SAFETY: We're offsetting by 2 and shrinking, which is legal
@@ -61,6 +63,7 @@ fn int_data(bytes: &[u8; 6]) -> &[u8; 4] {
     data
 }
 
+#[inline]
 fn int_data_mut(bytes: &mut [u8; 6]) -> &mut [u8; 4] {
     #[cfg(target_endian = "big")]
     // SAFETY: We're offsetting by 2 and shrinking, which is legal
@@ -76,6 +79,7 @@ fn int_data_mut(bytes: &mut [u8; 6]) -> &mut [u8; 4] {
     data
 }
 
+#[inline]
 fn write_int<I: IntInline>(val: I) -> [u8; 6] {
     let ty = (I::ty() as u16).to_ne_bytes();
     let val = val.to_bytes();
@@ -85,6 +89,7 @@ fn write_int<I: IntInline>(val: I) -> [u8; 6] {
     return [val[0], val[1], val[2], val[3], ty[0], ty[1]];
 }
 
+#[inline]
 fn read_int<I: IntInline>(bytes: &[u8; 6]) -> Option<I> {
     let ty = int_ty(bytes);
     let data = int_data(bytes);
@@ -98,11 +103,13 @@ fn read_int<I: IntInline>(bytes: &[u8; 6]) -> Option<I> {
 }
 
 impl HeapType {
+    #[inline]
     fn raw_tag(self) -> RawTag {
         // SAFETY: `HeapType` discriminant is in the range 1..7
         RawTag::new(false, unsafe { NonZeroU8::new_unchecked(self as u8) })
     }
 
+    #[inline]
     fn from_raw_tag(tag: RawTag) -> Option<HeapType> {
         if tag.is_neg() {
             return None;
@@ -135,6 +142,7 @@ enum IntType {
 }
 
 impl IntType {
+    #[inline]
     fn from_u16(val: u16) -> IntType {
         match val {
             0 => IntType::Bool,
@@ -159,11 +167,13 @@ trait IntInline: Sized {
     /// The provided bytes must be a valid instance of this type, obeying niche requirements
     unsafe fn from_bytes(bytes: [u8; 4]) -> Self;
 
+    #[inline]
     unsafe fn ref_bytes(bytes: &[u8; 4]) -> &Self {
         // SAFETY: All `IntInline` implementors allow this
         unsafe { &*bytes.as_ptr().cast() }
     }
 
+    #[inline]
     unsafe fn mut_bytes(bytes: &mut [u8; 4]) -> &mut Self {
         // SAFETY: All `IntInline` implementors allow this
         unsafe { &mut *bytes.as_mut_ptr().cast() }
@@ -184,6 +194,7 @@ pub trait HeapInlineRef<T>: HeapInline<T> {
 }
 
 impl<T, I: HeapInline<T> + IntInline> HeapInlineRef<T> for I {
+    #[inline]
     fn try_ref(value: &Value) -> Option<&Self> {
         let ty = int_ty(value.data());
         let data = int_data(value.data());
@@ -195,6 +206,7 @@ impl<T, I: HeapInline<T> + IntInline> HeapInlineRef<T> for I {
         }
     }
 
+    #[inline]
     fn try_mut(value: &mut Value) -> Option<&mut Self> {
         let ty = int_ty(value.data());
         let data = int_data_mut(value.data_mut());
@@ -210,14 +222,17 @@ impl<T, I: HeapInline<T> + IntInline> HeapInlineRef<T> for I {
 macro_rules! impl_int {
     ($ty:ty, $variant:ident) => {
         impl<T> HeapInlineSealed<T> for $ty {
+            #[inline]
             fn ty() -> HeapType {
                 HeapType::Int
             }
 
+            #[inline]
             fn write(self, value: &mut Value) {
                 value.set_data(write_int(self))
             }
 
+            #[inline]
             unsafe fn try_read(value: &Value) -> Option<Self> {
                 read_int(value.data())
             }
@@ -228,10 +243,12 @@ macro_rules! impl_int {
                 IntType::$variant
             }
 
+            #[inline]
             fn to_bytes(self) -> [u8; 4] {
                 self.to_ne_bytes().truncate_to()
             }
 
+            #[inline]
             unsafe fn from_bytes(bytes: [u8; 4]) -> Self {
                 <$ty>::from_ne_bytes(bytes.truncate_to())
             }
@@ -248,42 +265,51 @@ impl_int!(i16, I16);
 impl_int!(i32, I32);
 
 impl IntInline for bool {
+    #[inline]
     fn ty() -> IntType {
         IntType::Bool
     }
 
+    #[inline]
     fn to_bytes(self) -> [u8; 4] {
         [u8::from(self), 0, 0, 0]
     }
 
+    #[inline]
     unsafe fn from_bytes(bytes: [u8; 4]) -> Self {
         bytes[0] == 1
     }
 }
 
 impl<T> HeapInlineSealed<T> for bool {
+    #[inline]
     fn ty() -> HeapType {
         HeapType::Int
     }
 
+    #[inline]
     fn write(self, value: &mut Value) {
         value.set_data(write_int(self));
     }
 
+    #[inline]
     unsafe fn try_read(value: &Value) -> Option<Self> {
         read_int(value.data())
     }
 }
 
 impl IntInline for char {
+    #[inline]
     fn ty() -> IntType {
         IntType::Char
     }
 
+    #[inline]
     fn to_bytes(self) -> [u8; 4] {
         u32::to_bytes(self as u32)
     }
 
+    #[inline]
     unsafe fn from_bytes(bytes: [u8; 4]) -> Self {
         // SAFETY: Caller contract requires provided bytes form a valid char
         unsafe { char::from_u32_unchecked(u32::from_bytes(bytes)) }
@@ -291,56 +317,68 @@ impl IntInline for char {
 }
 
 impl<T> HeapInlineSealed<T> for char {
+    #[inline]
     fn ty() -> HeapType {
         HeapType::Int
     }
 
+    #[inline]
     fn write(self, value: &mut Value) {
         value.set_data(write_int(self));
     }
 
+    #[inline]
     unsafe fn try_read(value: &Value) -> Option<Self> {
         read_int(value.data())
     }
 }
 
 impl<T> HeapInlineSealed<T> for *const T {
+    #[inline]
     fn ty() -> HeapType {
         HeapType::Ptr
     }
 
+    #[inline]
     fn write(self, value: &mut Value) {
         RawStore::to_val(self, value);
     }
 
+    #[inline]
     unsafe fn try_read(value: &Value) -> Option<Self> {
         Some(RawStore::from_val(value))
     }
 }
 
 impl<T> HeapInlineSealed<T> for *mut T {
+    #[inline]
     fn ty() -> HeapType {
         HeapType::MutPtr
     }
 
+    #[inline]
     fn write(self, value: &mut Value) {
         RawStore::to_val(self, value);
     }
 
+    #[inline]
     unsafe fn try_read(value: &Value) -> Option<Self> {
         Some(RawStore::from_val(value))
     }
 }
 
 impl<'a, T> HeapInlineSealed<T> for &'a T {
+    #[inline]
     fn ty() -> HeapType {
         HeapType::Ref
     }
 
+    #[inline]
     fn write(self, value: &mut Value) {
         RawStore::to_val(self as *const T, value);
     }
 
+    #[inline]
     unsafe fn try_read(value: &Value) -> Option<Self> {
         // SAFETY: Caller is required to ensure value contains a valid reference
         Some(unsafe { &*<*const T as RawStore>::from_val(value) })
@@ -356,6 +394,7 @@ impl<'a, T> HeapInlineSealed<T> for &'a T {
 pub struct NanBox<'a, T>(RawBox, PhantomData<&'a mut T>);
 
 impl<'a, T> NanBox<'a, T> {
+    #[inline]
     fn from_raw(b: RawBox) -> NanBox<'a, T> {
         NanBox(b, PhantomData)
     }
@@ -363,6 +402,7 @@ impl<'a, T> NanBox<'a, T> {
     /// Store an [`f64`] value in this [`NanBox`]. If the value of the float is `NaN`, then it will
     /// be normalized to the standard quiet `NaN` representation used by the box, otherwise it will
     /// be stored as-is.
+    #[inline]
     #[must_use]
     pub fn from_float(val: f64) -> NanBox<'a, T> {
         NanBox::from_raw(RawBox::from_float(val))
@@ -388,8 +428,16 @@ impl<'a, T> NanBox<'a, T> {
         NanBox::from_raw(raw)
     }
 
+    /// Check whether this box currently contains a float
+    #[inline]
+    #[must_use]
+    pub fn is_float(&self) -> bool {
+        self.0.is_float()
+    }
+
     /// Attempt to get a reference to a contained floating-point value. This returns `Some` if the
     /// contained value is a float.
+    #[inline]
     #[must_use]
     pub fn try_ref_float(&self) -> Option<&f64> {
         self.0.float()
@@ -402,6 +450,7 @@ impl<'a, T> NanBox<'a, T> {
     /// into it which break our safety requirements. The [`SingleNaNF64`] type allows getting
     /// immutable references to the contained float, getting its value, or setting it to a value
     /// which will be normalized into the standard `NaN` value.
+    #[inline]
     #[must_use]
     pub fn try_mut_float(&mut self) -> Option<&mut SingleNaNF64> {
         self.0.float_mut()
@@ -502,6 +551,16 @@ impl<'a, T> NanBox<'a, T> {
                 }
             })
             .map_err(NanBox::from_raw)
+    }
+
+    /// Convert this type into the inner float, performing no checking. This is safe because
+    /// non-float values are stored as `NaN` representation floats, meaning they are always valid
+    /// to read as a floating-point value and cannot accidentally appear as a 'normal' value,
+    /// instead poisoning future operations performed with them.
+    #[inline]
+    pub fn into_float_unchecked(mut self) -> f64 {
+        let inner = mem::replace(&mut self.0, RawBox::from_float(f64::NAN));
+        inner.into_float_unchecked()
     }
 }
 

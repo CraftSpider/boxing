@@ -37,11 +37,13 @@ impl SingleNaNF64 {
 
     /// Write a float value into this location - if the float is `NaN`, it will be normalized into
     /// the canonical `NaN` values
+    #[inline]
     pub fn write(&mut self, val: f64) {
         *self = SingleNaNF64::new(val);
     }
 
     /// Copy out the contained float value
+    #[inline]
     #[must_use]
     pub fn get(self) -> f64 {
         self.0

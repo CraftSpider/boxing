@@ -93,7 +93,7 @@ fn is_float(c: &mut Criterion) {
         );
 }
 
-fn is_data(c: &mut Criterion) {
+fn is_value(c: &mut Criterion) {
     let mut group = c.benchmark_group("RawBox::is_value");
 
     let f0 = RawBox::from_float(0.0);
@@ -149,10 +149,44 @@ fn into_float(c: &mut Criterion) {
         );
 }
 
+fn into_value(c: &mut Criterion) {
+    let mut group = c.benchmark_group("RawBox::into_value");
+
+    let f0 = RawBox::from_float(0.0);
+    let fnan = RawBox::from_float(f64::NAN);
+    let valf1 = RawBox::from_value(Value::new(RawTag::new(false, NonZeroU8::MIN), [0; 6]));
+    let valt7 = RawBox::from_value(Value::new(
+        RawTag::new(true, NonZeroU8::new(7).unwrap()),
+        [255; 6],
+    ));
+
+    group
+        .bench_function(BenchmarkId::from_parameter("0.0"), |b| {
+            b.iter(|| black_box(f0.clone()).into_value().unwrap_err())
+        })
+        .bench_function(BenchmarkId::from_parameter("nan"), |b| {
+            b.iter(|| black_box(fnan.clone()).into_value().unwrap_err())
+        })
+        .bench_function(
+            BenchmarkId::from_parameter("Value(RawTag(false, 1), [0; 6])"),
+            |b| b.iter(|| black_box(valf1.clone()).into_value().unwrap()),
+        )
+        .bench_function(
+            BenchmarkId::from_parameter("Value(RawTag(true, 7), [255; 6])"),
+            |b| b.iter(|| black_box(valt7.clone()).into_value().unwrap()),
+        );
+}
+
 criterion_group!(
     name = float;
     config = util::criterion();
-    targets = new_float, new_value, is_float, is_data, into_float
+    targets = new_float, is_float, into_float
 );
 
-criterion_main!(float);
+criterion_group!(
+    name = value;
+    config = util::criterion();
+    targets = new_value, is_value, into_value
+);
+
+criterion_main!(float, value);

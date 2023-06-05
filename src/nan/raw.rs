@@ -29,20 +29,24 @@ pub trait RawStore: Sized {
 }
 
 impl RawStore for [u8; 6] {
+    #[inline]
     fn to_val(self, value: &mut Value) {
         value.set_data(self);
     }
 
+    #[inline]
     fn from_val(value: &Value) -> Self {
         *value.data()
     }
 }
 
 impl RawStore for bool {
+    #[inline]
     fn to_val(self, value: &mut Value) {
         value.set_data([1].truncate_to());
     }
 
+    #[inline]
     fn from_val(value: &Value) -> Self {
         value.data()[0] == 1
     }
@@ -51,11 +55,13 @@ impl RawStore for bool {
 macro_rules! int_store {
     ($ty:ty) => {
         impl RawStore for $ty {
+            #[inline]
             fn to_val(self, value: &mut Value) {
                 let bytes = self.to_ne_bytes();
                 value.set_data(bytes.truncate_to());
             }
 
+            #[inline]
             fn from_val(value: &Value) -> Self {
                 <$ty>::from_ne_bytes(value.data().truncate_to())
             }
@@ -168,6 +174,7 @@ pub struct RawTag(TagVal);
 impl RawTag {
     /// Create a new tag from a sign bit and a trailing tag value. If the provided value is greater
     /// than 7, it will be masked by `0b111` to convert it into the range `1..8`.
+    #[inline]
     #[must_use]
     pub fn new(neg: bool, val: NonZeroU8) -> RawTag {
         // SAFETY: Value truncated into range 0-7
@@ -176,6 +183,7 @@ impl RawTag {
 
     /// Create a new tag from a sign bit and a trailing tag value. If the provided value is outside
     /// the range `1..8`, `None` will be returned.
+    #[inline]
     #[must_use]
     pub fn new_checked(neg: bool, val: u8) -> Option<RawTag> {
         Some(RawTag(match (neg, val) {
@@ -204,6 +212,7 @@ impl RawTag {
     /// # Safety
     ///
     /// `val` must be in the range `1..8`
+    #[inline]
     #[must_use]
     pub unsafe fn new_unchecked(neg: bool, val: u8) -> RawTag {
         RawTag(match (neg, val) {
@@ -229,6 +238,7 @@ impl RawTag {
     }
 
     /// Return sign bit of this tag
+    #[inline]
     #[must_use]
     pub fn is_neg(self) -> bool {
         matches!(self.0, |TagVal::_N1| TagVal::_N2
@@ -240,6 +250,7 @@ impl RawTag {
     }
 
     /// Return the trailing value of this tag. The value is guaranteed to be in the range `1..8`.
+    #[inline]
     #[must_use]
     pub fn val(self) -> NonZeroU8 {
         match self.0 {
@@ -255,6 +266,7 @@ impl RawTag {
 
     /// Return the combination sign bit and trailing value of this tag. The value is guaranteed to
     /// be in the range `1..8`.
+    #[inline]
     #[must_use]
     pub fn neg_val(self) -> (bool, u8) {
         match self.0 {
@@ -290,24 +302,29 @@ impl fmt::Debug for RawTag {
 struct Header(u16);
 
 impl Header {
+    #[inline]
     fn new(tag: RawTag) -> Header {
         let (neg, val) = tag.neg_val();
         Header(0x7FF8 | (u16::from(neg) << 15) | u16::from(val))
     }
 
+    #[inline]
     fn tag(self) -> RawTag {
         // SAFETY: tag is guaranteed in range 1-7, we already truncated it and 0 never happens
         unsafe { RawTag::new_unchecked(self.get_sign(), self.get_tag()) }
     }
 
+    #[inline]
     fn get_sign(self) -> bool {
         self.0 & 0x8000 != 0
     }
 
+    #[inline]
     fn get_tag(self) -> u8 {
         (self.0 & 0x0007) as u8
     }
 
+    #[inline]
     fn into_raw(self) -> u16 {
         self.0
     }
@@ -327,6 +344,7 @@ pub struct Value {
 
 impl Value {
     /// Create a new `Value` with the specified tag and contained data.
+    #[inline]
     pub fn new(tag: RawTag, data: [u8; 6]) -> Value {
         Value {
             header: Header::new(tag),
@@ -335,6 +353,7 @@ impl Value {
     }
 
     /// Create a new `Value` with the specified tag and all-zero contained data.
+    #[inline]
     pub fn empty(tag: RawTag) -> Value {
         Value::new(tag, [0; 6])
     }
@@ -354,16 +373,19 @@ impl Value {
     /// Retrieve the [`RawTag`] of this `Value`. Downstream users should generally check this before
     /// calling [`load`](Self::load), as this type doesn't actually handle ensuring stored and
     /// loaded tag values match.
+    #[inline]
     #[must_use]
     pub fn tag(&self) -> RawTag {
         self.header.tag()
     }
 
+    #[inline]
     fn header(&self) -> &Header {
         &self.header
     }
 
     /// Set the contained data to the provided byte array
+    #[inline]
     pub fn set_data(&mut self, val: [u8; 6]) {
         self.data = val;
     }
@@ -374,6 +396,7 @@ impl Value {
     ///
     /// The byte array is guaranteed 2-byte aligned on all systems, and 4 byte aligned at either the
     /// start or at 2-byte offset depending on whether the system is little or big endian.
+    #[inline]
     #[must_use]
     pub fn data(&self) -> &[u8; 6] {
         &self.data
@@ -384,6 +407,7 @@ impl Value {
     /// # Alignment
     /// The byte array is guaranteed 2-byte aligned on all systems, and 4 byte aligned at either the
     /// start or at 2-byte offset depending on whether the system is little or big endian.
+    #[inline]
     #[must_use]
     pub fn data_mut(&mut self) -> &mut [u8; 6] {
         &mut self.data
@@ -399,6 +423,7 @@ impl Value {
     /// combination with [`whole_mut`](Self::whole_mut) - the return of this value is guaranteed a
     /// valid value to write into the pointer returned by [`whole_mut`](Self::whole_mut). If you
     /// only need access to the 6 data bytes, prefer [`data`](Self::data)
+    #[inline]
     #[must_use]
     pub unsafe fn whole(&self) -> &[u8; 8] {
         let ptr = (self as *const Value).cast::<[u8; 8]>();
@@ -416,6 +441,7 @@ impl Value {
     /// interpreted as a native-endian float, must be a `NaN`, and the 'tag' bits must be non-zero.
     /// There are no requirements on the value of the other 6 bytes. If you only need access to
     /// those bytes, prefer [`data_mut`](Self::data_mut).
+    #[inline]
     #[must_use]
     pub unsafe fn whole_mut(&mut self) -> &mut [u8; 8] {
         let ptr = (self as *mut Value).cast::<[u8; 8]>();
@@ -471,6 +497,7 @@ pub union RawBox {
 impl RawBox {
     /// Create a new [`RawBox`] from a float value. All `NaN` float values will be normalized as
     /// specified in the layout section of the type documentation.
+    #[inline]
     #[must_use]
     pub fn from_float(val: f64) -> RawBox {
         match (val.is_nan(), val.is_sign_positive()) {
@@ -485,6 +512,7 @@ impl RawBox {
     }
 
     /// Create a new [`RawBox`] from a non-float value stored in a `NaN` float representation.
+    #[inline]
     #[must_use]
     pub fn from_value(value: Value) -> RawBox {
         RawBox {
@@ -494,6 +522,7 @@ impl RawBox {
 
     /// Get the tag of the contained value, if the stored value isn't a float. Helper for
     /// `self.value().map(Value::tag)`.
+    #[inline]
     #[must_use]
     pub fn tag(&self) -> Option<RawTag> {
         if self.is_value() {
@@ -505,6 +534,7 @@ impl RawBox {
     }
 
     /// Check whether the contained value is a float
+    #[inline]
     #[must_use]
     pub fn is_float(&self) -> bool {
         // SAFETY: It is always sound to read this type as a float, or as raw bits
@@ -512,6 +542,7 @@ impl RawBox {
     }
 
     /// Check whether the contained value is a non-float value
+    #[inline]
     #[must_use]
     pub fn is_value(&self) -> bool {
         // SAFETY: It is always sound to read this type as a float, or as raw bits
@@ -520,6 +551,7 @@ impl RawBox {
 
     /// Get a reference to this type as a float. Returns `Some` if a float is currently stored,
     /// `None` otherwise.
+    #[inline]
     #[must_use]
     pub fn float(&self) -> Option<&f64> {
         if self.is_float() {
@@ -537,6 +569,7 @@ impl RawBox {
     /// This doesn't return a raw `f64` because then it would be possible for downstream users to
     /// write a non-normalized `NaN` value into it, breaking the contract of this type. The
     /// [`SingleNaNF64`] type exposes the value mutably while preventing that from happening.
+    #[inline]
     #[must_use]
     pub fn float_mut(&mut self) -> Option<&mut SingleNaNF64> {
         if self.is_float() {
@@ -549,6 +582,7 @@ impl RawBox {
 
     /// Get a reference to this type as a non-float stored value. Returns `Some` if a non-float
     /// value is currently stored, `None` otherwise.
+    #[inline]
     #[must_use]
     pub fn value(&self) -> Option<&Value> {
         if self.is_value() {
@@ -562,6 +596,7 @@ impl RawBox {
 
     /// Get a mutable reference to this type as a non-float stored value. Returns `Some` if a
     /// non-float value is currently stored, `None` otherwise.
+    #[inline]
     #[must_use]
     pub fn value_mut(&mut self) -> Option<&mut Value> {
         if self.is_value() {
@@ -577,6 +612,7 @@ impl RawBox {
 
     /// Convert this type into the inner float, if possible. Returns `Ok` if the stored type is
     /// currently a float, `Err(self)` otherwise.
+    #[inline]
     pub fn into_float(self) -> Result<f64, Self> {
         if self.is_float() {
             // SAFETY: If we pass the check, we contain a float, and can pull it out
@@ -588,6 +624,7 @@ impl RawBox {
 
     /// Convert this type into the inner value, if possible. Returns `Ok` if the stored type is
     /// currently a non-float value, `Err(self)` otherwise.
+    #[inline]
     pub fn into_value(self) -> Result<Value, Self> {
         if self.is_value() {
             // SAFETY: If we pass the check, we contain raw data, and can pull it out
@@ -601,6 +638,7 @@ impl RawBox {
     /// non-float values are stored as `NaN` representation floats, meaning they are always valid
     /// to read as a floating-point value and cannot accidentally appear as a 'normal' value,
     /// instead poisoning future operations performed with them.
+    #[inline]
     pub fn into_float_unchecked(self) -> f64 {
         // SAFETY: The inner value is *always* a valid float, if stored as a non-float this will
         //         simply return 'some NaN float value'
@@ -609,6 +647,7 @@ impl RawBox {
 }
 
 impl Clone for RawBox {
+    #[inline]
     fn clone(&self) -> Self {
         RawBox {
             // SAFETY: It is always sound to read this type as bits, which
