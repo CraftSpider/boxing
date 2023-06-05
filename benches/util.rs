@@ -1,5 +1,6 @@
 use criterion::Criterion;
 
+#[allow(unused_mut)]
 pub fn criterion() -> Criterion {
     let mut out = Criterion::default();
     #[cfg(unix)]

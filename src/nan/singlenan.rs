@@ -1,12 +1,18 @@
 use super::{QUIET_NAN, SIGN_MASK};
 use crate::nan::NEG_QUIET_NAN;
+use std::borrow::Borrow;
 use std::ops::{Add, Div, Mul, Sub};
 
+/// A 64-bit float type that can only contain one possible NaN value (positive or negative) matching
+/// the valid `NaN` values for a [`RawBox`](crate::nan::RawBox). This allows handing out mutable
+/// references to the contained float data without allowing users to write invalid data into the box.
 #[derive(Copy, Clone)]
 #[repr(transparent)]
 pub struct SingleNaNF64(f64);
 
 impl SingleNaNF64 {
+    /// Create a new `SingleNaNF64` from a float value - this will normalize any `NaN` into the
+    /// canonical value used by the type.
     #[must_use]
     pub fn new(val: f64) -> SingleNaNF64 {
         match (val.is_nan(), val.is_sign_positive()) {
@@ -16,6 +22,8 @@ impl SingleNaNF64 {
         }
     }
 
+    /// Attempt to make a `SingleNaNF64` from a mutable reference to an `f64` - this returns `Some`
+    /// if the provided float is either non-`NaN` or the canonical `NaN` value, `None` otherwise.
     #[must_use]
     pub fn from_mut(val: &mut f64) -> Option<&mut SingleNaNF64> {
         if val.is_nan() && (val.to_bits() & SIGN_MASK) != QUIET_NAN {
@@ -27,13 +35,28 @@ impl SingleNaNF64 {
         }
     }
 
+    /// Write a float value into this location - if the float is `NaN`, it will be normalized into
+    /// the canonical `NaN` values
     pub fn write(&mut self, val: f64) {
         *self = SingleNaNF64::new(val);
     }
 
+    /// Copy out the contained float value
     #[must_use]
     pub fn get(self) -> f64 {
         self.0
+    }
+}
+
+impl AsRef<f64> for SingleNaNF64 {
+    fn as_ref(&self) -> &f64 {
+        &self.0
+    }
+}
+
+impl Borrow<f64> for SingleNaNF64 {
+    fn borrow(&self) -> &f64 {
+        &self.0
     }
 }
 
