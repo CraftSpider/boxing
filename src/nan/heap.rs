@@ -38,9 +38,42 @@ mod sealed {
         /// The caller must have ensured that the value contains a valid instance of this type
         unsafe fn try_read(value: &Value) -> Option<Self>;
     }
+
+    pub trait HeapInlineRefSealed<T>: HeapInlineSealed<T> {
+        #[doc(hidden)]
+        fn try_ref(value: &Value) -> Option<&Self>;
+        #[doc(hidden)]
+        fn try_mut(value: &mut Value) -> Option<&mut Self>;
+    }
+
+    impl<T: HeapInline<U> + IntInline, U> HeapInlineRefSealed<U> for T {
+        #[inline]
+        fn try_ref(value: &Value) -> Option<&Self> {
+            let ty = int_ty(value.data());
+            let data = int_data(value.data());
+            if ty == <Self as IntInline>::ty() {
+                // SAFETY: Since types match, data is a valid instance of Self
+                Some(unsafe { Self::ref_bytes(data) })
+            } else {
+                None
+            }
+        }
+
+        #[inline]
+        fn try_mut(value: &mut Value) -> Option<&mut Self> {
+            let ty = int_ty(value.data());
+            let data = int_data_mut(value.data_mut());
+            if ty == <Self as IntInline>::ty() {
+                // SAFETY: Since types match, data is a valid instance of Self
+                Some(unsafe { Self::mut_bytes(data) })
+            } else {
+                None
+            }
+        }
+    }
 }
 
-use sealed::{HeapInlineSealed, HeapType};
+use sealed::{HeapInlineSealed, HeapInlineRefSealed, HeapType};
 
 #[inline]
 fn int_ty(bytes: impl Deref<Target = [u8; 6]>) -> IntType {
@@ -195,12 +228,7 @@ trait IntInline: Sized {
 pub trait HeapInline<T>: HeapInlineSealed<T> {}
 
 /// Trait for types that can have a reference to them taken while they are in a [`NanBox`]
-pub trait HeapInlineRef<T>: HeapInline<T> {
-    #[doc(hidden)]
-    fn try_ref(value: &Value) -> Option<&Self>;
-    #[doc(hidden)]
-    fn try_mut(value: &mut Value) -> Option<&mut Self>;
-}
+pub trait HeapInlineRef<T>: HeapInlineRefSealed<T> {}
 
 macro_rules! impl_int {
     ($ty:ty, $variant:ident) => {
@@ -239,31 +267,7 @@ macro_rules! impl_int {
             }
         }
 
-        impl<T> HeapInlineRef<T> for $ty {
-            #[inline]
-            fn try_ref(value: &Value) -> Option<&Self> {
-                let ty = int_ty(value.data());
-                let data = int_data(value.data());
-                if ty == <Self as IntInline>::ty() {
-                    // SAFETY: Since types match, data is a valid instance of Self
-                    Some(unsafe { Self::ref_bytes(data) })
-                } else {
-                    None
-                }
-            }
-
-            #[inline]
-            fn try_mut(value: &mut Value) -> Option<&mut Self> {
-                let ty = int_ty(value.data());
-                let data = int_data_mut(value.data_mut());
-                if ty == <Self as IntInline>::ty() {
-                    // SAFETY: Since types match, data is a valid instance of Self
-                    Some(unsafe { Self::mut_bytes(data) })
-                } else {
-                    None
-                }
-            }
-        }
+        impl<T> HeapInlineRef<T> for $ty {}
     };
 }
 
@@ -313,6 +317,8 @@ impl<T> HeapInlineSealed<T> for bool {
 
 impl<T> HeapInline<T> for bool {}
 
+impl<T> HeapInlineRef<T> for bool {}
+
 impl IntInline for char {
     #[inline]
     fn ty() -> IntType {
@@ -349,6 +355,8 @@ impl<T> HeapInlineSealed<T> for char {
 }
 
 impl<T> HeapInline<T> for char {}
+
+impl<T> HeapInlineRef<T> for char {}
 
 impl<T> HeapInlineSealed<T> for *const T {
     #[inline]
