@@ -27,7 +27,7 @@ mod sealed {
 
     pub trait HeapInlineSealed<T>: Sized {
         fn ty() -> HeapType;
-        
+
         /// Write this type into a [`Value`].
         fn write(self, value: &mut Value);
 
@@ -143,7 +143,7 @@ enum IntType {
     I8 = 5,
     I16 = 6,
     I32 = 7,
-    
+
     F32 = 8,
 }
 
@@ -188,7 +188,7 @@ trait IntInline: Sized {
 }
 
 /// Trait for types that can be stored inline in a [`NanBox`].
-/// 
+///
 /// This trait is sealed - the types that can be stored in a [`NanBox`] are
 /// determined by the library, if you wish to store other types, consider using [`RawBox`]
 /// to implement a custom version of this type.
@@ -220,7 +220,7 @@ macro_rules! impl_int {
                 read_int(value.data())
             }
         }
-        
+
         impl<T> HeapInline<T> for $ty {}
 
         impl IntInline for $ty {
@@ -238,7 +238,7 @@ macro_rules! impl_int {
                 <$ty>::from_ne_bytes(bytes.truncate_to())
             }
         }
-        
+
         impl<T> HeapInlineRef<T> for $ty {
             #[inline]
             fn try_ref(value: &Value) -> Option<&Self> {
@@ -251,7 +251,7 @@ macro_rules! impl_int {
                     None
                 }
             }
-        
+
             #[inline]
             fn try_mut(value: &mut Value) -> Option<&mut Self> {
                 let ty = int_ty(value.data());
@@ -411,12 +411,12 @@ impl<'a, T> HeapInline<T> for &'a T {}
 /// A NaN Box capable of safely storing a float, integer values of size <= <u class="mousetext" text="32 bits">4 bytes</u>,
 /// or an owned value of any size or pointers/references to it. This doesn't support storing
 /// mutable references as a trade-off to allow cloning.
-/// 
+///
 /// This type acts basically like the following Rust enum:
-/// 
+///
 /// ```
 /// # use boxing::nan::SingleNaNF64;
-/// 
+///
 /// enum NanBox<'a, T> {
 ///     Float(SingleNaNF64),
 ///     I8(i8),
@@ -433,7 +433,7 @@ impl<'a, T> HeapInline<T> for &'a T {}
 ///     Box(Box<T>),
 /// }
 /// ```
-/// 
+///
 /// We can't actually define ourselves as that because `SingleNaNF64` doesn't actually have a
 /// niche, and even if it did, special work is required to make pointers and references act as if
 /// they're 48 bits instead of 64 bits long.
@@ -629,7 +629,7 @@ macro_rules! from_inline {
                 NanBox::from_inline(value)
             }
         }
-    }
+    };
 }
 
 from_inline!(u8);
