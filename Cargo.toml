@@ -1,6 +1,6 @@
 [package]
 name = "boxing"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Easy-to-use, cross-platform implementations for NaN and ptr boxes"
 license = "MIT OR Apache-2.0"
