@@ -74,7 +74,7 @@
 //!     // Prints 2.0, nan, and nan. Leaks `InterpValue`.
 //!     println!("{}", v.into_float_unchecked());
 //! }
-//! 
+//!
 //! # }
 //! ```
 //!
