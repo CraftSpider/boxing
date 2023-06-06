@@ -447,9 +447,9 @@ impl<'a, T> NanBox<'a, T> {
     /// if the contained value is a float.
     ///
     /// This doesn't return a raw `f64` because then it would be possible to write `NaN` values
-    /// into it which break our safety requirements. The [`SingleNaNF64`] type allows getting
-    /// immutable references to the contained float, getting its value, or setting it to a value
-    /// which will be normalized into the standard `NaN` value.
+    /// into it which break our safety requirements. The [`SingleNaNF64`] type supports most float
+    /// operations, but can only be written to a single `NaN` value which matches our chosen
+    /// normalized `NaN`.
     #[inline]
     #[must_use]
     pub fn try_mut_float(&mut self) -> Option<&mut SingleNaNF64> {

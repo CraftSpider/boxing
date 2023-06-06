@@ -1,7 +1,7 @@
 use super::{QUIET_NAN, SIGN_MASK};
 use crate::nan::NEG_QUIET_NAN;
 use std::borrow::Borrow;
-use std::ops::{Add, Div, Mul, Sub};
+use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
 
 /// A 64-bit float type that can only contain one possible NaN value (positive or negative) matching
 /// the valid `NaN` values for a [`RawBox`](crate::nan::RawBox). This allows handing out mutable
@@ -123,5 +123,41 @@ impl Div<f64> for SingleNaNF64 {
 
     fn div(self, rhs: f64) -> Self::Output {
         SingleNaNF64::new(self.0 / rhs)
+    }
+}
+
+impl AddAssign<f64> for SingleNaNF64 {
+    fn add_assign(&mut self, rhs: f64) {
+        self.write(self.0 + rhs)
+    }
+}
+
+impl SubAssign<f64> for SingleNaNF64 {
+    fn sub_assign(&mut self, rhs: f64) {
+        self.write(self.0 - rhs)
+    }
+}
+
+impl MulAssign<f64> for SingleNaNF64 {
+    fn mul_assign(&mut self, rhs: f64) {
+        self.write(self.0 * rhs)
+    }
+}
+
+impl DivAssign<f64> for SingleNaNF64 {
+    fn div_assign(&mut self, rhs: f64) {
+        self.write(self.0 / rhs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::nan::SingleNaNF64;
+
+    #[test]
+    fn test_add_assign() {
+        let mut a = SingleNaNF64::new(0.0);
+        a += 1.0;
+        assert_eq!(a.get(), 1.0);
     }
 }
