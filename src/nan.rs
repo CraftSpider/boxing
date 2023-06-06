@@ -32,8 +32,8 @@
 //! A general example of using [`NanBox`] with some large data type:
 //!
 //! ```
-//! # #![cfg(not(miri))]
 //! # use boxing::nan::NanBox;
+//! # #[cfg(not(miri))] {
 //!
 //! // The thing we're storing in our box - a data type in our program
 //! #[derive(Debug)]
@@ -74,6 +74,8 @@
 //!     // Prints 2.0, nan, and nan. Leaks `InterpValue`.
 //!     println!("{}", v.into_float_unchecked());
 //! }
+//! 
+//! # }
 //! ```
 //!
 
