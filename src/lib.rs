@@ -1,5 +1,5 @@
-//! A library for pointer and NaN boxing data - storing other data values in the unused portions
-//! of a float or pointer.
+//! An easy-to-use, cross-platform library for pointer and NaN boxing data - storing other data
+//! values in the unused portions of a float or pointer.
 //!
 //! ## Examples
 //!
