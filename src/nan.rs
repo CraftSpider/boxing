@@ -32,6 +32,7 @@
 //! A general example of using [`NanBox`] with some large data type:
 //!
 //! ```
+//! # #![cfg(not(miri))]
 //! # use boxing::nan::NanBox;
 //!
 //! // The thing we're storing in our box - a data type in our program
@@ -68,9 +69,9 @@
 //! }
 //!
 //! // Final note: since every type is represented as a float, it's always safe and sound to turn
-//! // one into a float with no branches.
+//! // one into a float with no branches. This can leak memory though, so be careful.
 //! for v in values {
-//!     // Prints 2.0, nan, and nan.
+//!     // Prints 2.0, nan, and nan. Leaks `InterpValue`.
 //!     println!("{}", v.into_float_unchecked());
 //! }
 //! ```
