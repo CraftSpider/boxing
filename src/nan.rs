@@ -67,7 +67,7 @@
 //!         println!("{}", obj.fields[0].0);
 //!     }
 //! }
-//! 
+//!
 //! // For accessing multiple types at once, there are convenience functions for extracting them
 //! // as an enum
 //! for v in &values {
@@ -94,8 +94,8 @@ pub mod heap;
 pub mod raw;
 mod singlenan;
 
-pub use heap::{NanBox, NanBoxOwn, NanBoxRef, NanBoxMut};
-pub use raw::{RawBox, RawOwn, RawRef, RawMut};
+pub use heap::{NanBox, NanBoxMut, NanBoxOwn, NanBoxRef};
+pub use raw::{RawBox, RawMut, RawOwn, RawRef};
 pub use singlenan::SingleNaNF64;
 
 const SIGN_MASK: u64 = 0x7FFF_FFFF_FFFF_FFFF;

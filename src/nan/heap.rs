@@ -1,7 +1,7 @@
 //! A safe wrapper around a [`RawBox`] which can store a float, integer types of size >= 32, or
 //! references to/an owned value of a type of any size.
 
-use crate::nan::raw::{RawMut, RawRef, RawStore, RawTag, RawOwn, Value};
+use crate::nan::raw::{RawMut, RawOwn, RawRef, RawStore, RawTag, Value};
 use crate::nan::{RawBox, SingleNaNF64};
 use crate::utils::ArrayExt;
 use std::marker::PhantomData;
@@ -660,14 +660,14 @@ impl<'a, T> NanBox<'a, T> {
             }
         }
     }
-    
+
     /// Convert this type into a normal Rust enum containing references to possible contained values.
     pub fn enum_ref(&self) -> NanBoxRef<'_, 'a, T> {
         let val = match self.0.enum_ref() {
             RawRef::Float(f) => return NanBoxRef::Float(f),
             RawRef::Value(v) => v,
         };
-        
+
         match HeapType::from_raw_tag(val.tag()).unwrap() {
             HeapType::Int => {
                 let ty = int_ty(val.data());
@@ -698,7 +698,7 @@ impl<'a, T> NanBox<'a, T> {
             }
         }
     }
-    
+
     pub fn enum_mut(&mut self) -> NanBoxMut<'_, T> {
         let val = match self.0.enum_mut() {
             RawMut::Float(f) => return NanBoxMut::Float(f),
@@ -810,7 +810,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ptr_slot;
-        
+
         let (name, val): (_, &dyn fmt::Debug) = match self.enum_ref() {
             NanBoxRef::Float(val) => ("NanBox::Float", val),
             NanBoxRef::I32(val) => ("NanBox::I32", val),
@@ -824,18 +824,16 @@ where
             NanBoxRef::Ptr(val) => {
                 ptr_slot = val;
                 ("NanBox::Ptr", &ptr_slot)
-            },
+            }
             NanBoxRef::PtrMut(val) => {
                 ptr_slot = val as *const T;
                 ("NanBox::PtrMut", &ptr_slot)
-            },
+            }
             NanBoxRef::Ref(val) => ("NanBox::Ref", val),
             NanBoxRef::Box(val) => ("NanBox::Box", val),
         };
-        
-        f.debug_tuple(name)
-            .field(val)
-            .finish()
+
+        f.debug_tuple(name).field(val).finish()
     }
 }
 
