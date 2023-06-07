@@ -32,7 +32,7 @@
 //! A general example of using [`NanBox`] with some large data type:
 //!
 //! ```
-//! # use boxing::nan::NanBox;
+//! # use boxing::nan::{NanBox, NanBoxRef};
 //! # #[cfg(not(miri))] {
 //!
 //! // The thing we're storing in our box - a data type in our program
@@ -67,6 +67,17 @@
 //!         println!("{}", obj.fields[0].0);
 //!     }
 //! }
+//! 
+//! // For accessing multiple types at once, there are convenience functions for extracting them
+//! // as an enum
+//! for v in &values {
+//!     match v.enum_ref() {
+//!         NanBoxRef::Float(f) => println!("{}", f),
+//!         NanBoxRef::Box(b) => println!("{:?}", b.fields),
+//!         NanBoxRef::I32(i) => println!("{}", i),
+//!         _ => panic!(),
+//!     }
+//! }
 //!
 //! // Final note: since every type is represented as a float, it's always safe and sound to turn
 //! // one into a float with no branches. This can leak memory though, so be careful.
@@ -83,8 +94,8 @@ pub mod heap;
 pub mod raw;
 mod singlenan;
 
-pub use heap::NanBox;
-pub use raw::RawBox;
+pub use heap::{NanBox, NanBoxOwn, NanBoxRef, NanBoxMut};
+pub use raw::{RawBox, RawOwn, RawRef, RawMut};
 pub use singlenan::SingleNaNF64;
 
 const SIGN_MASK: u64 = 0x7FFF_FFFF_FFFF_FFFF;

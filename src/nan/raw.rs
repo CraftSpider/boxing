@@ -644,6 +644,38 @@ impl RawBox {
         //         simply return 'some NaN float value'
         unsafe { self.float }
     }
+
+    pub fn into_enum(self) -> RawOwn {
+        if self.is_float() {
+            // SAFETY: If we pass the check, we contain a float
+            RawOwn::Float(unsafe { self.float })
+        } else {
+            // SAFETY: If we don't pass the check, we contain a value
+            RawOwn::Value(ManuallyDrop::into_inner(unsafe { self.value }))
+        }
+    }
+
+    pub fn enum_ref(&self) -> RawRef<'_> {
+        if self.is_float() {
+            // SAFETY: If we pass the check, we contain a float
+            RawRef::Float(unsafe { &self.float })
+        } else {
+            // SAFETY: If we don't pass the check, we contain a value
+            RawRef::Value(unsafe { &self.value })
+        }
+    }
+
+    pub fn enum_mut(&mut self) -> RawMut<'_> {
+        if self.is_float() {
+            // SAFETY: If we pass the check, we contain a float
+            let single = SingleNaNF64::from_mut(unsafe { &mut self.float });
+            // SAFETY: If we pass the check, we're guaranteed to contain a valid float for SingleNaN
+            RawMut::Float(unsafe { single.unwrap_unchecked() })
+        } else {
+            // SAFETY: If we don't pass the check, we contain a value
+            RawMut::Value(unsafe { &mut self.value })
+        }
+    }
 }
 
 impl Clone for RawBox {
@@ -670,6 +702,21 @@ impl fmt::Debug for RawBox {
             }
         }
     }
+}
+
+pub enum RawOwn {
+    Float(f64),
+    Value(Value),
+}
+
+pub enum RawRef<'a> {
+    Float(&'a f64),
+    Value(&'a Value),
+}
+
+pub enum RawMut<'a> {
+    Float(&'a mut SingleNaNF64),
+    Value(&'a mut Value),
 }
 
 #[cfg(test)]
