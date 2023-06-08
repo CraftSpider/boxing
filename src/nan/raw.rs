@@ -645,6 +645,7 @@ impl RawBox {
         unsafe { self.float }
     }
 
+    /// Convert this value into an enum containing either a float or the raw value that was stored
     pub fn into_enum(self) -> RawOwn {
         if self.is_float() {
             // SAFETY: If we pass the check, we contain a float
@@ -655,6 +656,7 @@ impl RawBox {
         }
     }
 
+    /// Get a reference to this instance as either a float or as the non-float value that was stored
     pub fn enum_ref(&self) -> RawRef<'_> {
         if self.is_float() {
             // SAFETY: If we pass the check, we contain a float
@@ -665,6 +667,8 @@ impl RawBox {
         }
     }
 
+    /// Get a mutable reference to this instance as either a float or as the non-float value that was
+    /// stored
     pub fn enum_mut(&mut self) -> RawMut<'_> {
         if self.is_float() {
             // SAFETY: If we pass the check, we contain a float
@@ -704,18 +708,27 @@ impl fmt::Debug for RawBox {
     }
 }
 
+/// Enum for the two possible states of a [`RawBox`], for matching convenience
 pub enum RawOwn {
+    /// A float value
     Float(f64),
+    /// A non-float value
     Value(Value),
 }
 
+/// Enum for possible references into a [`RawBox`] .
 pub enum RawRef<'a> {
+    /// A reference to a stored float
     Float(&'a f64),
+    /// A reference to non-float data
     Value(&'a Value),
 }
 
+/// Enum for possible mutable references into a [`RawBox`].
 pub enum RawMut<'a> {
+    /// A mutable reference to a stored float
     Float(&'a mut SingleNaNF64),
+    /// A mutable reference to non-float data
     Value(&'a mut Value),
 }
 

@@ -147,19 +147,19 @@ impl HeapType {
     }
 
     #[inline]
-    fn from_raw_tag(tag: RawTag) -> Option<HeapType> {
+    fn from_raw_tag(tag: RawTag) -> HeapType {
         if tag.is_neg() {
-            return None;
+            unreachable!();
         }
 
-        Some(match tag.val().get() {
+        match tag.val().get() {
             1 => HeapType::Int,
             2 => HeapType::Ptr,
             3 => HeapType::MutPtr,
             4 => HeapType::Ref,
             6 => HeapType::Box,
-            _ => return None,
-        })
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -518,7 +518,7 @@ impl<'a, T> NanBox<'a, T> {
     #[must_use]
     pub fn try_ref_inline<U: HeapInlineRef<T> + 'a>(&self) -> Option<&U> {
         self.0.value().and_then(|val| {
-            if HeapType::from_raw_tag(val.tag()) == Some(<U as HeapInlineSealed<_>>::ty()) {
+            if HeapType::from_raw_tag(val.tag()) == <U as HeapInlineSealed<_>>::ty() {
                 U::try_ref(val)
             } else {
                 None
@@ -531,7 +531,7 @@ impl<'a, T> NanBox<'a, T> {
     #[must_use]
     pub fn try_mut_inline<U: HeapInlineRef<T> + 'a>(&mut self) -> Option<&mut U> {
         self.0.value_mut().and_then(|val| {
-            if HeapType::from_raw_tag(val.tag()) == Some(<U as HeapInlineSealed<_>>::ty()) {
+            if HeapType::from_raw_tag(val.tag()) == <U as HeapInlineSealed<_>>::ty() {
                 U::try_mut(val)
             } else {
                 None
@@ -544,7 +544,7 @@ impl<'a, T> NanBox<'a, T> {
     #[must_use]
     pub fn try_ref_boxed(&self) -> Option<&T> {
         self.0.value().and_then(|val| {
-            if HeapType::from_raw_tag(val.tag()) == Some(HeapType::Box) {
+            if HeapType::from_raw_tag(val.tag()) == HeapType::Box {
                 let ptr = <*const T as RawStore>::from_val(val);
                 // SAFETY: Type is Box, so inner value is owned by us and can be referenced matching us
                 Some(unsafe { &*ptr })
@@ -559,7 +559,7 @@ impl<'a, T> NanBox<'a, T> {
     #[must_use]
     pub fn try_mut_boxed(&mut self) -> Option<&mut T> {
         self.0.value_mut().and_then(|val| {
-            if HeapType::from_raw_tag(val.tag()) == Some(HeapType::Box) {
+            if HeapType::from_raw_tag(val.tag()) == HeapType::Box {
                 let ptr = <*mut T as RawStore>::from_val(val);
                 // SAFETY: Type is Box, so inner value is owned by us and can be referenced matching us
                 Some(unsafe { &mut *ptr })
@@ -581,7 +581,7 @@ impl<'a, T> NanBox<'a, T> {
         self.0
             .value()
             .and_then(|val| {
-                if HeapType::from_raw_tag(val.tag()) == Some(U::ty()) {
+                if HeapType::from_raw_tag(val.tag()) == U::ty() {
                     // SAFETY: We just checked that the type matches, so this is sound
                     unsafe { U::try_read(val) }
                 } else {
@@ -599,7 +599,7 @@ impl<'a, T> NanBox<'a, T> {
         inner
             .into_value()
             .and_then(|val| {
-                if HeapType::from_raw_tag(val.tag()) == Some(HeapType::Box) {
+                if HeapType::from_raw_tag(val.tag()) == HeapType::Box {
                     let ptr = val.load::<*mut T>();
                     // SAFETY: Since type matches, this value was leaked from a box
                     Ok(unsafe { *Box::from_raw(ptr) })
@@ -630,18 +630,26 @@ impl<'a, T> NanBox<'a, T> {
             RawOwn::Value(v) => v,
         };
 
-        match HeapType::from_raw_tag(val.tag()).unwrap() {
+        match HeapType::from_raw_tag(val.tag()) {
             HeapType::Int => {
                 let ty = int_ty(val.data());
                 let data = int_data(val.data());
                 match ty {
+                    // SAFETY: Type matches, so this is sound
                     IntType::Bool => NanBoxOwn::Bool(unsafe { bool::from_bytes(*data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::Char => NanBoxOwn::Char(unsafe { char::from_bytes(*data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::U8 => NanBoxOwn::U8(unsafe { u8::from_bytes(*data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::U16 => NanBoxOwn::U16(unsafe { u16::from_bytes(*data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::U32 => NanBoxOwn::U32(unsafe { u32::from_bytes(*data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::I8 => NanBoxOwn::I8(unsafe { i8::from_bytes(*data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::I16 => NanBoxOwn::I16(unsafe { i16::from_bytes(*data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::I32 => NanBoxOwn::I32(unsafe { i32::from_bytes(*data) }),
                     IntType::F32 => unimplemented!(),
                 }
@@ -668,18 +676,26 @@ impl<'a, T> NanBox<'a, T> {
             RawRef::Value(v) => v,
         };
 
-        match HeapType::from_raw_tag(val.tag()).unwrap() {
+        match HeapType::from_raw_tag(val.tag()) {
             HeapType::Int => {
                 let ty = int_ty(val.data());
                 let data = int_data(val.data());
                 match ty {
+                    // SAFETY: Type matches, so this is sound
                     IntType::Bool => NanBoxRef::Bool(unsafe { bool::ref_bytes(data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::Char => NanBoxRef::Char(unsafe { char::ref_bytes(data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::U8 => NanBoxRef::U8(unsafe { u8::ref_bytes(data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::U16 => NanBoxRef::U16(unsafe { u16::ref_bytes(data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::U32 => NanBoxRef::U32(unsafe { u32::ref_bytes(data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::I8 => NanBoxRef::I8(unsafe { i8::ref_bytes(data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::I16 => NanBoxRef::I16(unsafe { i16::ref_bytes(data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::I32 => NanBoxRef::I32(unsafe { i32::ref_bytes(data) }),
                     IntType::F32 => unimplemented!(),
                 }
@@ -692,31 +708,41 @@ impl<'a, T> NanBox<'a, T> {
                 NanBoxRef::Ref(unsafe { &*ptr })
             }
             HeapType::Box => {
-                let ptr = <*mut T as RawStore>::from_val(&val);
+                let ptr = <*mut T as RawStore>::from_val(val);
                 // SAFETY: Type is `Box`, so contained pointer is valid for our life
                 NanBoxRef::Box(unsafe { &*ptr })
             }
         }
     }
 
+    /// Convert this type into a normal Rust enum containing mutable references to contained values,
+    /// where possible.
     pub fn enum_mut(&mut self) -> NanBoxMut<'_, T> {
         let val = match self.0.enum_mut() {
             RawMut::Float(f) => return NanBoxMut::Float(f),
             RawMut::Value(v) => v,
         };
 
-        match HeapType::from_raw_tag(val.tag()).unwrap() {
+        match HeapType::from_raw_tag(val.tag()) {
             HeapType::Int => {
                 let ty = int_ty(val.data());
                 let data = int_data_mut(val.data_mut());
                 match ty {
+                    // SAFETY: Type matches, so this is sound
                     IntType::Bool => NanBoxMut::Bool(unsafe { bool::mut_bytes(data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::Char => NanBoxMut::Char(unsafe { char::mut_bytes(data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::U8 => NanBoxMut::U8(unsafe { u8::mut_bytes(data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::U16 => NanBoxMut::U16(unsafe { u16::mut_bytes(data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::U32 => NanBoxMut::U32(unsafe { u32::mut_bytes(data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::I8 => NanBoxMut::I8(unsafe { i8::mut_bytes(data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::I16 => NanBoxMut::I16(unsafe { i16::mut_bytes(data) }),
+                    // SAFETY: Type matches, so this is sound
                     IntType::I32 => NanBoxMut::I32(unsafe { i32::mut_bytes(data) }),
                     IntType::F32 => unimplemented!(),
                 }
@@ -725,7 +751,7 @@ impl<'a, T> NanBox<'a, T> {
             HeapType::MutPtr => NanBoxMut::InvalidVariant,
             HeapType::Ref => NanBoxMut::InvalidVariant,
             HeapType::Box => {
-                let ptr = <*mut T as RawStore>::from_val(&val);
+                let ptr = <*mut T as RawStore>::from_val(val);
                 // SAFETY: Type is `Box`, so contained pointer is valid for our life
                 NanBoxMut::Box(unsafe { &mut *ptr })
             }
@@ -839,7 +865,7 @@ where
 
 impl<'a, T> Drop for NanBox<'a, T> {
     fn drop(&mut self) {
-        if self.0.tag().and_then(HeapType::from_raw_tag) == Some(HeapType::Box) {
+        if self.0.tag().map(HeapType::from_raw_tag) == Some(HeapType::Box) {
             let ptr = self.0.value().map(<*mut T>::from_val).unwrap();
             // SAFETY: If our type is `Box`, we contain an owned pointer and are allowed to free it on drop
             drop(unsafe { Box::from_raw(ptr) });
@@ -849,6 +875,7 @@ impl<'a, T> Drop for NanBox<'a, T> {
 
 /// Enum for all possible values that can be stored in a [`NanBox`], for better ergonomics
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum NanBoxOwn<'a, T> {
     /// A floating-point value
     Float(f64),
@@ -880,6 +907,7 @@ pub enum NanBoxOwn<'a, T> {
 
 /// Enum for all possible references one can get out of a [`NanBox`], for better ergonomics
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum NanBoxRef<'a, 'b, T> {
     /// Reference to a float stored in the box
     Float(&'a f64),
@@ -911,6 +939,7 @@ pub enum NanBoxRef<'a, 'b, T> {
 
 /// Enum for all possible mutable one can get out of a [`NanBox`], for better ergonomics
 #[derive(Debug, PartialEq)]
+#[non_exhaustive]
 pub enum NanBoxMut<'a, T> {
     /// Mutable reference to a float stored in the box
     Float(&'a mut SingleNaNF64),
